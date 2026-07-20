@@ -1,0 +1,19 @@
+# 환경변수
+.env
+
+# DB (실제 재무 데이터)
+*.db
+*.sqlite
+
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.pyo
+
+# 로그
+logs/
+*.log
+
+# 데이터
+data/

@@ -1,0 +1,30 @@
+---
+name: verified-tickers
+description: FDR 검증된 종목코드-종목명 매핑 (재사용)
+type: project
+---
+## 검증된 매핑 (FDR 검증 완료)
+
+### 코스피 대형주
+| 종목명 | 코드 | 비고 |
+|---|---|---|
+| 삼성전자 | 005930 | 보통주 |
+| SK하이닉스 | 000660 | - |
+| 현대차 | 005380 | 보통주 |
+| 현대차우 | 005385 | **1우** (2우B와 혼동 금지) |
+
+### ETF
+| 종목명 | 코드 | 추종/배수/복제 |
+|---|---|---|
+| TIGER 미국필라델피아반도체나스닥 | 381180 | SOX 1배 실물 |
+| TIGER 미국필라델피아반도체레버리지 | 423920 | SOX 2배 합성 |
+
+### 검증 명령
+```python
+import FinanceDataReader as fdr
+ks = fdr.StockListing('KRX')
+ks[ks['Name'].str.contains('종목명', na=False)]
+```
+
+**Why:** 같은 종목 재검증 비용 절감.
+**How to apply:** 새 종목 검증 시 즉시 추가.

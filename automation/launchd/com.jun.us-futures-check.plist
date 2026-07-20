@@ -1,0 +1,41 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.jun.us-futures-check</string>
+
+    <key>ProgramArguments</key>
+    <array>
+        <string>/Users/jun/chikitaka/dart-insight/.venv/bin/python</string>
+        <string>/Users/jun/chikitaka/dart-insight/src/krx_flow/us_futures.py</string>
+        <string>--quiet</string>
+    </array>
+
+    <!-- 매일 한국 시간 06:00 (미국 정규장 마감 후 1시간) + 08:00 (장 시작 1시간 전) -->
+    <key>StartCalendarInterval</key>
+    <array>
+        <dict>
+            <key>Hour</key>
+            <integer>6</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+        <dict>
+            <key>Hour</key>
+            <integer>8</integer>
+            <key>Minute</key>
+            <integer>0</integer>
+        </dict>
+    </array>
+
+    <key>StandardOutPath</key>
+    <string>/Users/jun/chikitaka/dart-insight/logs/us_futures_stdout.log</string>
+
+    <key>StandardErrorPath</key>
+    <string>/Users/jun/chikitaka/dart-insight/logs/us_futures_stderr.log</string>
+
+    <key>WorkingDirectory</key>
+    <string>/Users/jun/chikitaka/dart-insight</string>
+</dict>
+</plist>
