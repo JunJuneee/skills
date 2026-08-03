@@ -1,0 +1,38 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>com.jun.claude.squad-sync</string>
+
+  <!-- 스쿼드 handoff watcher: .squad/handoff/*.json 을 주워
+       GitHub PR + Linear 이슈/문서 + #squad 알림으로 자동 연동.
+       30초 폴링 상주(--watch). plain python(claude -p 아님) → EPERM 무관.
+       설치(사용자 1회):
+         cp ~/Desktop/github/skills/discord-agents/squad/com.jun.claude.squad-sync.plist ~/Library/LaunchAgents/
+         launchctl bootstrap gui/$(id -u) ~/Library/LaunchAgents/com.jun.claude.squad-sync.plist
+       중지:
+         launchctl bootout gui/$(id -u)/com.jun.claude.squad-sync -->
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/jun/claude-agents/.venv/bin/python</string>
+    <string>/Users/jun/Desktop/github/skills/discord-agents/squad/squad_sync.py</string>
+    <string>--watch</string>
+    <string>--interval</string>
+    <string>30</string>
+  </array>
+
+  <key>WorkingDirectory</key>
+  <string>/Users/jun/Desktop/github/skills/discord-agents</string>
+
+  <key>KeepAlive</key>
+  <true/>
+  <key>RunAtLoad</key>
+  <true/>
+
+  <key>StandardOutPath</key>
+  <string>/Users/jun/claude-agents/logs/squad-sync.log</string>
+  <key>StandardErrorPath</key>
+  <string>/Users/jun/claude-agents/logs/squad-sync.log</string>
+</dict>
+</plist>
