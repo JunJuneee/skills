@@ -1,0 +1,4 @@
+interface:
+  display_name: "Blogspot Publisher"
+  short_description: "이미지·목차·공식 링크를 포함해 Blogger에 게시"
+  default_prompt: "Use $blogspot-publisher to verify, format, publish, and validate this Blogger post."

@@ -2,6 +2,7 @@
 
 import os
 import re
+import sys
 from datetime import datetime, timedelta, timezone
 from typing import Optional
 
@@ -9,6 +10,10 @@ import requests
 
 API_KEY = "AIzaSyB79UBMIqiAuB7860x9PfeBj9FwnayByQY"  # YouTube Data API v3 키를 입력하세요
 BASE_URL = "https://www.googleapis.com/youtube/v3"
+
+
+class LilysAuthenticationError(Exception):
+    """Lilys access token이 없거나 만료되었을 때 발생합니다."""
 
 
 def get_channel_id(handle: str) -> Optional[str]:
@@ -132,6 +137,8 @@ def get_existing_source_ids(collection_id, bearer_token):
             "sortType": "newest",
         },
     )
+    if resp.status_code == 401:
+        raise LilysAuthenticationError("Lilys 인증 실패 (401)")
     if not resp.ok:
         print(f"   Lilys 기존 목록 조회 실패 ({resp.status_code})")
         return set()
@@ -162,6 +169,8 @@ def send_to_lilys(video, collection_id, channel_name, bearer_token):
             "shouldStartImmediately": True,
         },
     )
+    if resp.status_code == 401:
+        raise LilysAuthenticationError("Lilys 인증 실패 (401)")
     return resp
 
 
@@ -221,18 +230,13 @@ def main():
          "name": "알고란", "collection_id": 154987}
     ]
 
-    # 1순위: 환경변수, 2순위: token.txt 파일
-    bearer_token = os.environ.get("BEARER_TOKEN")
+    # 인증은 실행 시 주입된 환경변수만 사용합니다. 디스크의 token.txt는 읽지 않습니다.
+    bearer_token = os.environ.get("BEARER_TOKEN", "").strip()
     if not bearer_token:
-        token_path = os.path.join(os.path.dirname(__file__), "token.txt")
-        if os.path.exists(token_path):
-            with open(token_path, "r") as f:
-                bearer_token = f.read().strip()
-            print(f"token.txt에서 토큰을 읽었습니다.")
-        else:
-            print(f"token.txt 파일을 생성해주세요: {token_path}")
-            print("내용: Bearer eyJ...")
-            return
+        print("BEARER_TOKEN 환경변수가 필요합니다.")
+        return 2
+    if not bearer_token.startswith("Bearer "):
+        bearer_token = f"Bearer {bearer_token}"
 
     since = datetime.now(timezone.utc) - timedelta(days=2)
 
@@ -289,4 +293,9 @@ def main():
 
 
 if __name__ == "__main__":
-    main()
+    try:
+        exit_code = main()
+    except LilysAuthenticationError as exc:
+        print(str(exc))
+        exit_code = 2
+    sys.exit(exit_code or 0)

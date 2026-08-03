@@ -1,0 +1,4 @@
+interface:
+  display_name: "네이버 SEO·애드포스트 블로그"
+  short_description: "네이버 검색과 애드포스트에 맞춘 정보성 글 작성"
+  default_prompt: "$naver-seo-blog-writer로 최신 공식 자료를 반영한 네이버 블로그 게시용 글을 작성해줘."

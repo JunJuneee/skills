@@ -1,0 +1,4 @@
+interface:
+  display_name: "쿠팡 파트너스 딥링크"
+  short_description: "쿠팡 상품 URL을 파트너스 링크로 안전하게 변환"
+  default_prompt: "Use $coupang-partners-deeplink to convert this Coupang product URL into a verified affiliate link."
