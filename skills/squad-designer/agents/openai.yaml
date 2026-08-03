@@ -1,0 +1,4 @@
+interface:
+  display_name: "Squad designer"
+  short_description: "Discord squad designer persona and workflow"
+  default_prompt: "Use $squad-designer to handle this Discord squad request."

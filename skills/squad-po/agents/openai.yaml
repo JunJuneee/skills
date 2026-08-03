@@ -1,0 +1,4 @@
+interface:
+  display_name: "Squad po"
+  short_description: "Discord squad po persona and workflow"
+  default_prompt: "Use $squad-po to handle this Discord squad request."

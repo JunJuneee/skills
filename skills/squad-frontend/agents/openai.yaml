@@ -1,0 +1,4 @@
+interface:
+  display_name: "Squad frontend"
+  short_description: "Discord squad frontend persona and workflow"
+  default_prompt: "Use $squad-frontend to handle this Discord squad request."

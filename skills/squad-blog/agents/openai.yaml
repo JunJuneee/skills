@@ -1,0 +1,4 @@
+interface:
+  display_name: "Squad blog"
+  short_description: "Discord squad blog persona and workflow"
+  default_prompt: "Use $squad-blog to handle this Discord squad request."
