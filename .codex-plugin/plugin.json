@@ -1,0 +1,16 @@
+{
+  "name": "jun-skills",
+  "version": "0.1.0",
+  "description": "Investment + SEO/publishing skills: portfolio/premarket/KRX flow analysis, Naver & Google SEO writers, Blogspot publisher, Coupang deeplink, card generators.",
+  "author": { "name": "Jun", "url": "https://github.com/JunJuneee" },
+  "homepage": "https://github.com/JunJuneee/skills",
+  "repository": "https://github.com/JunJuneee/skills",
+  "license": "MIT",
+  "keywords": ["investment", "korea-stock", "seo", "blogging", "publishing"],
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Jun Skills",
+    "shortDescription": "Investment / SEO / publishing skills",
+    "category": "Productivity"
+  }
+}

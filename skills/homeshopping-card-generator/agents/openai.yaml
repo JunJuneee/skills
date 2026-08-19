@@ -1,0 +1,4 @@
+interface:
+  display_name: "Home Shopping Card Generator"
+  short_description: "Create fixed-format AI home-shopping cards."
+  default_prompt: "Create Korean 2x2 home-shopping cards using the saved template and AI product illustrations."

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Google SEO 카드 생성"
+  short_description: "게시글 핵심 정보를 카드뉴스 이미지로 만듭니다"
+  default_prompt: "Use $google-seo-card-generator to create Korean card-news images from this blog post."

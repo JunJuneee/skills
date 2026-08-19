@@ -1,0 +1,13 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
+  "name": "jun-skills",
+  "description": "Jun's personal skill collection (investment / SEO / publishing).",
+  "owner": { "name": "Jun", "url": "https://github.com/JunJuneee" },
+  "plugins": [
+    {
+      "name": "jun-skills",
+      "source": "./",
+      "description": "All skills in this repo, auto-discovered from skills/."
+    }
+  ]
+}

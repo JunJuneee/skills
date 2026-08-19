@@ -1,0 +1,4 @@
+interface:
+  display_name: "금융 네이버 포스트"
+  short_description: "금융·증시 글을 복사 버튼 HTML로 작성합니다"
+  default_prompt: "Use $financial-naver-posts to create a Naver-ready Korean market post."

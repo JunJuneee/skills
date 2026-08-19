@@ -1,0 +1,4 @@
+interface:
+  display_name: "Market Note Shorts"
+  short_description: "금융 마감 원고·TTS·카드 영상을 자동 제작"
+  default_prompt: "Use $market-note-shorts to create a verified Korean Market Note short from market data and a supplied TTS MP3."

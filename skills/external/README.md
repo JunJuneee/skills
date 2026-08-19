@@ -1,5 +1,7 @@
 # External Skills (외부 제공)
 
+> ⚠️ chart-analyst 는 `skills/chart-analyst/` 로 이동했습니다 (Claude Code / Codex 자동 스캔 대상).
+
 이 디렉토리는 **외부에서 제공받은 Claude Code Skills**의 백업입니다.
 
 ## 포함 스킬
@@ -34,7 +36,7 @@
 
 외부 스킬이 업데이트될 경우:
 ```bash
-cp ~/.claude/skills/chart-analyst/SKILL.md skills/external/chart-analyst/
+cp ~/.claude/skills/chart-analyst/SKILL.md skills/chart-analyst/
 ```
 
 ## 활용 예시

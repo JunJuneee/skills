@@ -1,0 +1,17 @@
+{
+  "name": "jun-skills",
+  "interface": { "displayName": "Jun Skills" },
+  "plugins": [
+    {
+      "name": "jun-skills",
+      "source": {
+        "source": "git-subdir",
+        "url": "https://github.com/JunJuneee/skills.git",
+        "path": "./",
+        "ref": "master"
+      },
+      "policy": { "installation": "AVAILABLE", "authentication": "ON_INSTALL" },
+      "category": "Productivity"
+    }
+  ]
+}

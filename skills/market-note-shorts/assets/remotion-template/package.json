@@ -1,0 +1,19 @@
+{
+  "name": "market-note-remotion-template",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "studio": "remotion studio src/index.ts",
+    "render": "remotion render src/index.ts DailyMarketCloseCalm out/market-note-final.mp4 --concurrency=1 --log=error"
+  },
+  "dependencies": {
+    "@remotion/cli": "4.0.410",
+    "remotion": "4.0.410",
+    "zod": "3.22.3"
+  },
+  "devDependencies": {
+    "@types/node": "22.13.10",
+    "typescript": "5.7.3"
+  }
+}
