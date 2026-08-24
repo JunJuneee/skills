@@ -1,6 +1,6 @@
-# Instagram reel publishing
+# Instagram app setup
 
-Publishes the social-safe Market Note reel through the Instagram Content Publishing API.
+Publishes a vertical reel through the Instagram Content Publishing API.
 
 Instagram Login **rejects `upload_type=resumable`** — every API version answers a container
 request with `The parameter video_url is required`. Resumable upload from disk works only
@@ -50,7 +50,7 @@ python scripts/instagram_auth.py whoami
 The dashboard now issues a 60-day token directly. Exchanging one again fails with code 452
 (`Session key invalid`), so `exchange` detects that and stores the token unchanged.
 
-Both write to `~/.config/market-note/instagram.json` with owner-only permissions. Never
+Both write to `~/.config/instagram-reels/credentials.json` with owner-only permissions. Never
 commit that file or paste a token into the repository. `IG_ACCESS_TOKEN` and `IG_USER_ID`
 override the config file when set.
 
@@ -70,7 +70,7 @@ without calling the API:
 
 ```bash
 python scripts/publish_reels.py \
-  video/korea-market-close-2026-08-24-reels.mp4 \
+  VIDEO.mp4 \
   --caption-file scripts/instagram-caption.txt \
   --dry-run
 ```
@@ -82,8 +82,7 @@ works without extra infrastructure:
 gh release create ig-media-YYYY-MM-DD --repo OWNER/REPO \
   --title "Instagram media staging YYYY-MM-DD" --notes "Temporary." VIDEO.mp4
 
-python scripts/publish_reels.py video/korea-market-close-YYYY-MM-DD-reels.mp4 \
-  --caption-file scripts/korea-market-close-YYYY-MM-DD-instagram-caption.txt \
+python scripts/publish_reels.py VIDEO.mp4 --caption-file CAPTION.txt \
   --video-url "https://github.com/OWNER/REPO/releases/download/ig-media-YYYY-MM-DD/VIDEO.mp4"
 
 gh release delete ig-media-YYYY-MM-DD --repo OWNER/REPO --yes --cleanup-tag
@@ -92,8 +91,9 @@ gh release delete ig-media-YYYY-MM-DD --repo OWNER/REPO --yes --cleanup-tag
 Delete the staging release once the permalink prints. Instagram has already fetched the
 file by then, and leaving it published serves the video from a second public location.
 
-Publish the `-reels.mp4` social-safe variant, not `-final.mp4`. The standard Shorts render
-places text under the Instagram action rail and bottom overlay.
+Publish the social-safe variant when the source project renders more than one. A layout
+built for YouTube Shorts alone puts text under Instagram's right action rail and bottom
+overlay.
 
 The script creates a resumable container, uploads the file, polls `status_code` until
 `FINISHED`, publishes, and prints the permalink. Transcoding usually finishes within a
@@ -124,7 +124,7 @@ API call when the render violates them.
 | File size | 300 MB maximum |
 | Caption | 2200 characters maximum |
 
-A standard 1080x1920 Market Note reel clears all of these. When a render trips the `moov`
+A standard 1080x1920 vertical render clears all of these. When a render trips the `moov`
 check, remux without re-encoding:
 
 ```bash

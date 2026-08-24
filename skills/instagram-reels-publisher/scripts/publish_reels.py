@@ -22,8 +22,17 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
-DEFAULT_CONFIG = Path.home() / ".config" / "market-note" / "instagram.json"
+CONFIG_PATH = Path.home() / ".config" / "instagram-reels" / "credentials.json"
+# Credentials first lived under the market-note skill; keep reading that file so an
+# existing setup does not have to be redone.
+LEGACY_CONFIG_PATH = Path.home() / ".config" / "market-note" / "instagram.json"
 GRAPH_HOSTS = {"instagram": "graph.instagram.com", "facebook": "graph.facebook.com"}
+
+
+def default_config() -> Path:
+    if not CONFIG_PATH.is_file() and LEGACY_CONFIG_PATH.is_file():
+        return LEGACY_CONFIG_PATH
+    return CONFIG_PATH
 RUPLOAD_HOST = "rupload.facebook.com"
 API_VERSION = "v23.0"
 
@@ -293,7 +302,7 @@ def main() -> int:
         action="store_true",
         help="Keep the reel out of the main feed, showing it only in the Reels tab",
     )
-    parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    parser.add_argument("--config", type=Path, default=default_config())
     parser.add_argument("--login-type", choices=sorted(GRAPH_HOSTS))
     parser.add_argument("--access-token")
     parser.add_argument("--ig-user-id")

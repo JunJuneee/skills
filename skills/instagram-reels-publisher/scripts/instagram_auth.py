@@ -21,9 +21,18 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
-DEFAULT_CONFIG = Path.home() / ".config" / "market-note" / "instagram.json"
+CONFIG_PATH = Path.home() / ".config" / "instagram-reels" / "credentials.json"
+# Credentials first lived under the market-note skill; keep reading that file so an
+# existing setup does not have to be redone.
+LEGACY_CONFIG_PATH = Path.home() / ".config" / "market-note" / "instagram.json"
 GRAPH_HOSTS = {"instagram": "graph.instagram.com", "facebook": "graph.facebook.com"}
 API_VERSION = "v23.0"
+
+
+def default_config() -> Path:
+    if not CONFIG_PATH.is_file() and LEGACY_CONFIG_PATH.is_file():
+        return LEGACY_CONFIG_PATH
+    return CONFIG_PATH
 
 
 class ApiError(Exception):
@@ -172,7 +181,7 @@ def cmd_refresh(args, config_path: Path, config: dict) -> int:
 
 def main() -> int:
     common = argparse.ArgumentParser(add_help=False)
-    common.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
+    common.add_argument("--config", type=Path, default=default_config())
     common.add_argument("--login-type", choices=sorted(GRAPH_HOSTS), default="instagram")
     common.add_argument("--access-token")
     common.add_argument("--app-secret")

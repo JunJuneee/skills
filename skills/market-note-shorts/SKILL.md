@@ -12,7 +12,7 @@ Build a verified Korean financial short from facts to a voice-synchronized verti
 - Read [references/script-style.md](references/script-style.md) before writing or revising narration.
 - Read [references/visual-spec.md](references/visual-spec.md) before changing cards, typography, scene order, or the disclaimer.
 - Read [references/research-and-qa.md](references/research-and-qa.md) when facts must be researched or a rendered video must be accepted.
-- Read [references/instagram-publishing.md](references/instagram-publishing.md) when a finished reel must be published to Instagram.
+- Use the **instagram-reels-publisher** skill when a finished reel must be published to Instagram.
 - Use [assets/remotion-template](assets/remotion-template) when no working Remotion project exists. Otherwise modify the user's existing project in place.
 
 ## Workflow
@@ -176,26 +176,13 @@ Place the final video at `video/{market}-market-close-YYYY-MM-DD-final.mp4`, whe
 
 ### 8. Publish the reel to Instagram
 
-Only when the user asks for Instagram delivery. Read
-[references/instagram-publishing.md](references/instagram-publishing.md) for the Meta app
-setup, token handling, and the full specification table.
+Only when the user asks for Instagram delivery. Use the **instagram-reels-publisher**
+skill, which owns the scripts, the Meta app setup, and the specification table.
 
-Publish the social-safe `-reels.mp4` variant, never `-final.mp4`. Always dry-run first:
-
-```bash
-python scripts/publish_reels.py video/{market}-market-close-YYYY-MM-DD-reels.mp4 \
-  --caption-file scripts/{market}-market-close-YYYY-MM-DD-instagram-caption.txt --dry-run
-```
-
-The dry run performs every local specification check and prints the caption without
-calling the API. To publish, stage the file at a public HTTPS URL and pass `--video-url`:
-Instagram Login rejects resumable uploads and fetches the video itself. Delete the staged
-copy once the permalink prints. A `--cover-url` likewise needs a public HTTPS JPEG, so
-prefer `--thumb-offset` when nothing is staged for it.
-
-Credentials live in `~/.config/market-note/instagram.json` via
-`scripts/instagram_auth.py`. Never write a token into the repository or into a handoff
-note. Long-lived tokens expire after 60 days; run `instagram_auth.py refresh` before then.
+Publish the social-safe `-reels.mp4` variant, never `-final.mp4`: the standard Shorts
+layout puts text under Instagram's action rail. Write the caption to
+`scripts/{market}-market-close-YYYY-MM-DD-instagram-caption.txt` in the episode archive so
+it is retained with the other deliverables.
 
 ## Non-negotiable rules
 
