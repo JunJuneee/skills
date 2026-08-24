@@ -166,9 +166,10 @@ python scripts/publish_reels.py video/{market}-market-close-YYYY-MM-DD-reels.mp4
 ```
 
 The dry run performs every local specification check and prints the caption without
-calling the API. Drop `--dry-run` to publish. The video uploads directly from disk, so no
-public hosting is needed; a `--cover-url` still requires a public HTTPS JPEG, so prefer
-`--thumb-offset` when no host is available.
+calling the API. To publish, stage the file at a public HTTPS URL and pass `--video-url`:
+Instagram Login rejects resumable uploads and fetches the video itself. Delete the staged
+copy once the permalink prints. A `--cover-url` likewise needs a public HTTPS JPEG, so
+prefer `--thumb-offset` when nothing is staged for it.
 
 Credentials live in `~/.config/market-note/instagram.json` via
 `scripts/instagram_auth.py`. Never write a token into the repository or into a handoff

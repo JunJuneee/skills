@@ -1,7 +1,12 @@
 # Instagram reel publishing
 
 Publishes the social-safe Market Note reel through the Instagram Content Publishing API.
-The video uploads straight from disk, so no public file hosting is required.
+
+Instagram Login **rejects `upload_type=resumable`** — every API version answers a container
+request with `The parameter video_url is required`. Resumable upload from disk works only
+on the Facebook Login path. So the reel must sit at a **public HTTPS URL** while Instagram
+fetches it, which it does once, at container creation. After the reel is published the URL
+is no longer used and the file can be removed.
 
 ## One-time account and app setup
 
@@ -22,15 +27,28 @@ Instagram account linked to a Facebook Page, and uses `instagram_basic`,
 `instagram_content_publish`, and `pages_read_engagement`. Prefer Instagram Login unless a
 Page is already part of the workflow.
 
-## Store the credentials
+The Instagram account also needs the **Instagram tester** role on the app before any token
+can be generated, or `계정 추가` fails with "insufficient developer role":
 
-Exchange the short-lived token for a 60-day token and record the account id:
+1. App Dashboard → **App roles → Roles** → **Add people**.
+2. Pick the role **Instagram tester first** — the plain Administrator/Developer/Tester
+   fields accept Facebook users only and reject an Instagram handle with
+   `does not resolve to a valid user ID`.
+3. Enter the Instagram username, add, and the row shows **Pending**.
+4. Accept from the Instagram side at
+   [instagram.com/accounts/manage_access](https://www.instagram.com/accounts/manage_access/)
+   → **Tester invites** tab, signed in as that account. Pending roles stay inactive.
+
+## Store the credentials
 
 ```bash
 python scripts/instagram_auth.py exchange \
-  --access-token SHORT_LIVED_TOKEN --app-secret APP_SECRET --save-app-secret
+  --access-token TOKEN --app-secret APP_SECRET --save-app-secret
 python scripts/instagram_auth.py whoami
 ```
+
+The dashboard now issues a 60-day token directly. Exchanging one again fails with code 452
+(`Session key invalid`), so `exchange` detects that and stores the token unchanged.
 
 Both write to `~/.config/market-note/instagram.json` with owner-only permissions. Never
 commit that file or paste a token into the repository. `IG_ACCESS_TOKEN` and `IG_USER_ID`
@@ -57,13 +75,22 @@ python scripts/publish_reels.py \
   --dry-run
 ```
 
-Then publish:
+Then stage the file somewhere public and publish. A GitHub release on a public repository
+works without extra infrastructure:
 
 ```bash
-python scripts/publish_reels.py \
-  video/korea-market-close-2026-08-24-reels.mp4 \
-  --caption-file scripts/instagram-caption.txt
+gh release create ig-media-YYYY-MM-DD --repo OWNER/REPO \
+  --title "Instagram media staging YYYY-MM-DD" --notes "Temporary." VIDEO.mp4
+
+python scripts/publish_reels.py video/korea-market-close-YYYY-MM-DD-reels.mp4 \
+  --caption-file scripts/korea-market-close-YYYY-MM-DD-instagram-caption.txt \
+  --video-url "https://github.com/OWNER/REPO/releases/download/ig-media-YYYY-MM-DD/VIDEO.mp4"
+
+gh release delete ig-media-YYYY-MM-DD --repo OWNER/REPO --yes --cleanup-tag
 ```
+
+Delete the staging release once the permalink prints. Instagram has already fetched the
+file by then, and leaving it published serves the video from a second public location.
 
 Publish the `-reels.mp4` social-safe variant, not `-final.mp4`. The standard Shorts render
 places text under the Instagram action rail and bottom overlay.

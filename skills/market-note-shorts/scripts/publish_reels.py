@@ -279,6 +279,12 @@ def main() -> int:
     parser.add_argument("--caption", help="Caption text passed inline")
     parser.add_argument("--caption-file", type=Path, help="File holding the caption body")
     parser.add_argument("--hashtags-file", type=Path, help="File appended to the caption after a blank line")
+    parser.add_argument(
+        "--video-url",
+        help="Public HTTPS URL Instagram fetches the video from. Required for Instagram "
+        "Login, which does not accept resumable uploads. The local file is still used "
+        "for the preflight checks.",
+    )
     parser.add_argument("--cover-url", help="Public HTTPS URL of a JPEG cover; overrides --thumb-offset")
     parser.add_argument("--thumb-offset", type=int, default=0, help="Cover frame position in milliseconds")
     parser.add_argument("--audio-name", help="Names the reel audio; Instagram allows this only once")
@@ -323,9 +329,14 @@ def main() -> int:
 
     container_params = {
         "media_type": "REELS",
-        "upload_type": "resumable",
         "share_to_feed": "false" if args.no_share_to_feed else "true",
     }
+    if args.video_url:
+        # Instagram Login rejects upload_type=resumable, so the file must be fetched
+        # from a public HTTPS URL. See references/instagram-publishing.md.
+        container_params["video_url"] = args.video_url
+    else:
+        container_params["upload_type"] = "resumable"
     if caption:
         container_params["caption"] = caption
     if args.cover_url:
@@ -339,6 +350,7 @@ def main() -> int:
         print("\n--- dry run ---")
         print(f"endpoint     : https://{host}/{API_VERSION}/{ig_user_id or '<IG_USER_ID>'}/media")
         print(f"video        : {video} ({video.stat().st_size / 1024 / 1024:.1f}MB)")
+        print(f"source       : {args.video_url or 'resumable upload from disk'}")
         print(f"login_type   : {login_type}")
         print(f"token        : {'present' if token else 'MISSING'}")
         print(f"ig_user_id   : {ig_user_id or 'MISSING'}")
@@ -359,7 +371,8 @@ def main() -> int:
         raise SystemExit(f"Container creation returned no id: {container}")
     print(f"Created container {container_id}")
 
-    upload_video(container_id, video, token, args.upload_attempts)
+    if not args.video_url:
+        upload_video(container_id, video, token, args.upload_attempts)
     wait_until_finished(host, container_id, token, args.poll_interval, args.poll_timeout)
 
     published = api_request(

@@ -26,6 +26,16 @@ GRAPH_HOSTS = {"instagram": "graph.instagram.com", "facebook": "graph.facebook.c
 API_VERSION = "v23.0"
 
 
+class ApiError(Exception):
+    def __init__(self, status: int, path: str, body: str) -> None:
+        super().__init__(f"Instagram API error {status} on GET /{path}: {body}")
+        self.status = status
+        try:
+            self.code = json.loads(body).get("error", {}).get("code")
+        except json.JSONDecodeError:
+            self.code = None
+
+
 def api_get(host: str, path: str, params: dict) -> dict:
     url = f"https://{host}/{API_VERSION}/{path.lstrip('/')}?{urllib.parse.urlencode(params)}"
     request = urllib.request.Request(url, method="GET")
@@ -33,8 +43,7 @@ def api_get(host: str, path: str, params: dict) -> dict:
         with urllib.request.urlopen(request, timeout=60) as response:
             return json.loads(response.read().decode("utf-8"))
     except urllib.error.HTTPError as error:
-        detail = error.read().decode("utf-8", "replace")
-        raise SystemExit(f"Instagram API error {error.code} on GET /{path}: {detail}") from error
+        raise ApiError(error.code, path, error.read().decode("utf-8", "replace")) from error
 
 
 def load_config(path: Path) -> dict:
@@ -103,15 +112,27 @@ def cmd_exchange(args, config_path: Path, config: dict) -> int:
         raise SystemExit("Pass the app secret via --app-secret or IG_APP_SECRET.")
 
     if args.login_type == "instagram":
-        payload = api_get(
-            GRAPH_HOSTS["instagram"],
-            "access_token",
-            {
-                "grant_type": "ig_exchange_token",
-                "client_secret": app_secret,
-                "access_token": short_token,
-            },
-        )
+        try:
+            payload = api_get(
+                GRAPH_HOSTS["instagram"],
+                "access_token",
+                {
+                    "grant_type": "ig_exchange_token",
+                    "client_secret": app_secret,
+                    "access_token": short_token,
+                },
+            )
+        except ApiError as error:
+            # The App Dashboard now hands out 60-day tokens directly, and those cannot be
+            # exchanged again. Keep the token we were given rather than failing the setup.
+            if error.code != 452:
+                raise
+            print("Token is already long-lived; storing it as-is.")
+            config["login_type"] = args.login_type
+            if args.save_app_secret:
+                config["app_secret"] = app_secret
+            store_token(config_path, config, short_token, None)
+            return 0
     else:
         if not args.app_id:
             raise SystemExit("Facebook login exchange also needs --app-id.")
@@ -177,7 +198,10 @@ def main() -> int:
         args.login_type = "facebook"
 
     handlers = {"whoami": cmd_whoami, "exchange": cmd_exchange, "refresh": cmd_refresh}
-    return handlers[args.command](args, config_path, config)
+    try:
+        return handlers[args.command](args, config_path, config)
+    except ApiError as error:
+        raise SystemExit(str(error)) from error
 
 
 if __name__ == "__main__":
