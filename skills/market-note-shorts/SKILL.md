@@ -46,6 +46,28 @@ If `faster_whisper` is installed in a nonstandard directory, add `--python-path 
 
 Use the returned segment start times to locate semantic boundaries. Never reuse timestamps from an older voice file.
 
+### 3a. Build the episode file
+
+Episodes are data, not new components. Write one JSON file per episode against
+`assets/remotion-template/src/marketNote/types.ts` and render the shared `MarketNoteVideo`
+and `MarketNoteCard` compositions with `--props=<episode>.json`. Do not add a dated
+`.tsx` per day; that is what made the pipeline unautomatable.
+
+Rows come in four shapes — `pair` (close plus change), `stat` (a labelled figure that
+wraps), `single` (name and one value), and `numbered` (an ordered checklist). Any run
+wrapped in asterisks takes the accent colour, so `"최대 *150조원*"` keeps 최대 in ink.
+
+Derive the cue frames from the measured audio rather than by eye:
+
+```bash
+python scripts/build_cues.py timing.json --scene-segments 0 1 3 5 9 13 15 17 \
+  --episode src/marketNote/data/YYYY-MM-DD-{market}.json
+```
+
+Each number is the timing.json segment index that opens a scene, so the count must be the
+opening plus one per entry in `scenes`. Cuts land at the midpoint of the pause between
+sentences, and the disclaimer starts at the measured file length.
+
 ### 4. Map narration to eight scenes
 
 Use this fixed semantic order:

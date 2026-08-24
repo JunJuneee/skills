@@ -1,0 +1,116 @@
+{
+  "market": "korea",
+  "date": "2026-08-24",
+  "dateLabel": "2026.08.24 · 한국 증시",
+  "marketLabel": "오늘의 한국 증시",
+  "audio": "korea-market-close-2026-08-24-tts.mp3",
+  "opening": {
+    "eyebrow": "KOREA CLOSE IN ONE MINUTE",
+    "headline": ["삼성전자 급락에", "코스피 3% 하락"],
+    "headlineTone": "down",
+    "summaryLabel": "ONE-LINE SUMMARY",
+    "summaryLines": ["외국인·기관 3조원대 순매도", "코스닥은 1.42% 반등"]
+  },
+  "scenes": [
+    {
+      "title": ["코스피와 코스닥은", "정반대로 움직였습니다"],
+      "titleTone": "blue",
+      "rows": [
+        {"kind": "pair", "name": "KOSPI", "value": "6,696.96", "change": "-3.12%", "tone": "down"},
+        {"kind": "pair", "name": "KOSDAQ", "value": "813.33", "change": "+1.42%", "tone": "up"}
+      ],
+      "note": {
+        "style": "plain",
+        "lines": ["대형 반도체 조정과", "성장주 반등이 동시에 나타났습니다."]
+      }
+    },
+    {
+      "title": ["하락의 중심은", "반도체 투톱"],
+      "titleTone": "down",
+      "rows": [
+        {"kind": "pair", "name": "삼성전자", "value": "257,000원", "change": "-8.70%", "tone": "down"},
+        {"kind": "pair", "name": "SK하이닉스", "value": "1,671,000원", "change": "-3.41%", "tone": "down"}
+      ],
+      "note": {
+        "style": "plain",
+        "lines": ["지수 비중이 큰 두 종목의 약세가", "코스피 하락을 이끌었습니다."]
+      }
+    },
+    {
+      "title": ["주주환원 발표가", "기대에 못 미쳤습니다"],
+      "titleTone": "down",
+      "rows": [
+        {"kind": "stat", "label": "삼성전자 발표", "lines": ["2026년 주주환원", "90조~110조원"]},
+        {"kind": "stat", "label": "시장 기대치", "lines": ["최대 *150조원*"], "tone": "down"}
+      ],
+      "note": {
+        "style": "plain",
+        "lines": ["배당과 자사주 매입 같은 세부 방식은", "10월에 공유될 예정입니다."]
+      }
+    },
+    {
+      "title": ["수급은", "매도 우위"],
+      "titleTone": "down",
+      "rows": [
+        {"kind": "single", "name": "개인", "value": "+3조 3,217억원", "tone": "up"},
+        {"kind": "single", "name": "외국인", "value": "-3조 6,691억원", "tone": "down"},
+        {"kind": "single", "name": "기관", "value": "-1조 2,901억원", "tone": "down"}
+      ],
+      "note": {
+        "style": "tint",
+        "tone": "down",
+        "lines": ["개인 매수로도 외국인과 기관의", "대규모 매도를 막지 못했습니다."]
+      }
+    },
+    {
+      "title": ["코스닥은 반등", "이차전지가 주도"],
+      "titleTone": "up",
+      "rows": [
+        {"kind": "single", "name": "에코프로비엠", "value": "+10.80%", "tone": "up"},
+        {"kind": "single", "name": "에코프로", "value": "+7.59%", "tone": "up"},
+        {"kind": "single", "name": "파마리서치", "value": "+3.87%", "tone": "up"}
+      ],
+      "note": {
+        "style": "plain",
+        "lines": ["반도체 대형주에서 빠진 수급 일부가", "성장주로 이동한 모습입니다."]
+      }
+    },
+    {
+      "title": ["코스피 안에서도", "오른 종목은 있었습니다"],
+      "titleTone": "up",
+      "rows": [
+        {"kind": "single", "name": "한미약품", "value": "+29.96%", "tone": "up"},
+        {"kind": "single", "name": "LG에너지솔루션", "value": "+5.39%", "tone": "up"},
+        {"kind": "single", "name": "삼성바이오로직스", "value": "+1.42%", "tone": "up"}
+      ],
+      "note": {
+        "style": "plain",
+        "lines": ["지수는 급락했지만", "업종별 순환매는 이어졌습니다."]
+      }
+    },
+    {
+      "title": ["내일 확인할 건", "두 가지"],
+      "titleTone": "blue",
+      "rows": [
+        {"kind": "numbered", "text": "반도체 투톱의 수급 안정", "tone": "down"},
+        {"kind": "numbered", "text": "코스닥 순환매의 지속성", "tone": "blue"}
+      ],
+      "note": {
+        "style": "dark",
+        "lines": ["매도세가 진정되는지와", "코스닥 반등의 지속성을 함께 보겠습니다."]
+      }
+    }
+  ],
+  "cues": [
+    {"from": 0, "duration": 91},
+    {"from": 91, "duration": 264},
+    {"from": 355, "duration": 295},
+    {"from": 650, "duration": 475},
+    {"from": 1125, "duration": 431},
+    {"from": 1556, "duration": 283},
+    {"from": 1839, "duration": 290},
+    {"from": 2129, "duration": 209}
+  ],
+  "disclaimerFrom": 2338,
+  "disclaimerFrames": 60
+}
