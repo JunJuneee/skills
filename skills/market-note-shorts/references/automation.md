@@ -20,12 +20,17 @@ ELEVENLABS_VOICE_ID=<the Kim voice id>
 STAGING_REPO=JunJuneee/skills
 YOUTUBE_PRIVACY=public
 YOUTUBE_TAGS=마켓노트,증시마감
-AGENT_CMD="codex exec"
 NOTIFY_CMD='/Users/jun/claude-agents/.venv/bin/python /Users/jun/claude-agents/lib/notify.py'
 ```
 
 `ELEVENLABS_VOICE_ID` is required because the API key lacks `voices_read`, so the voice
 cannot be looked up by name. `NOTIFY_CMD` is optional; it receives one argument.
+
+The agent stages run headless Claude Code, `claude -p --permission-mode bypassPermissions`,
+with the Remotion project and the skill added as working directories. Bypassing
+permissions is what makes the run unattended: a scheduled job has nobody to answer a tool
+prompt and would hang until launchd killed it. Override `AGENT_CMD` to change model or
+flags, for example `AGENT_CMD="claude -p --permission-mode bypassPermissions --model opus"`.
 
 ## Stages
 

@@ -28,7 +28,9 @@ CONFIG="${MARKET_NOTE_ENV:-$HOME/.config/market-note/automation.env}"
 : "${YOUTUBE_DIR:?set YOUTUBE_DIR in $CONFIG}"
 : "${ELEVENLABS_VOICE_ID:?set ELEVENLABS_VOICE_ID in $CONFIG}"
 : "${STAGING_REPO:?set STAGING_REPO in $CONFIG}"
-AGENT_CMD="${AGENT_CMD:-codex exec}"
+# Headless Claude Code. bypassPermissions is what makes it unattended: a scheduled run
+# has nobody to answer a tool prompt, and the job would hang until launchd killed it.
+AGENT_CMD="${AGENT_CMD:-claude -p --permission-mode bypassPermissions}"
 PRIVACY="${YOUTUBE_PRIVACY:-public}"
 INSTAGRAM_SCRIPTS="${INSTAGRAM_SCRIPTS:-$SKILL_DIR/../instagram-reels-publisher/scripts}"
 
@@ -67,14 +69,15 @@ on_error() {
 trap 'on_error $LINENO' ERR
 
 run_agent() {
-  # $1 = prompt. The agent works inside the archive so relative paths resolve.
-  ( cd "$EPISODE" && $AGENT_CMD "$1" )
+  # $1 = prompt. The agent runs inside the archive so relative paths resolve, and needs
+  # the Remotion project and the skill on top of that to write the episode file.
+  ( cd "$EPISODE" && $AGENT_CMD --add-dir "$REMOTION_DIR" --add-dir "$SKILL_DIR" "$1" )
 }
 
 # 1. Research, copy, and the episode data file.
 if [[ ! -f "$DATA_JSON" ]]; then
   echo "--- 1/9 writing episode"
-  run_agent "Use the market-note-shorts skill to build the $MARKET market close episode for $DATE.
+  run_agent "Use the jun-skills:market-note-shorts skill to build the $MARKET market close episode for $DATE.
 Produce, with no placeholder values:
   scripts/$SLUG-facts.md, -display.txt, -tts.txt
   scripts/$SLUG-title.txt          one line, the YouTube title
