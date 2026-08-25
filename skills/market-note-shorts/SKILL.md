@@ -13,6 +13,7 @@ Build a verified Korean financial short from facts to a voice-synchronized verti
 - Read [references/visual-spec.md](references/visual-spec.md) before changing cards, typography, scene order, or the disclaimer.
 - Read [references/research-and-qa.md](references/research-and-qa.md) when facts must be researched or a rendered video must be accepted.
 - Use the **instagram-reels-publisher** skill when a finished reel must be published to Instagram.
+- Read [references/automation.md](references/automation.md) when the daily episode should run unattended on a schedule.
 - Use [assets/remotion-template](assets/remotion-template) when no working Remotion project exists. Otherwise modify the user's existing project in place.
 
 ## Workflow
