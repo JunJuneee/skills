@@ -59,7 +59,10 @@ Publish polished Korean posts to the configured Blogger site through the local `
 - MCP project: `/Users/jun/Desktop/skills/mcp-blogspot-posting`
 - Server entry: `dist/src/server.js`
 - Blog URL: `https://betterpickguide.blogspot.com`
-- OAuth client: `/Users/jun/Downloads/client_secret.json`
+- Default credentials directory: `~/.config/lilis-blog/`
+- OAuth client: `~/.config/lilis-blog/google-client-secret.json` (`GOOGLE_BLOGGER_CLIENT_SECRET` overrides it)
+- Refresh token: `~/.config/lilis-blog/blogger-tokens.json` (`GOOGLE_BLOGGER_TOKEN_PATH` overrides it)
+- Blog ID cache: `~/.config/lilis-blog/blog-id-cache.json` (`GOOGLE_BLOGGER_BLOG_ID_CACHE_PATH` overrides it)
 
 Do not print tokens, credentials, or client-secret contents. Reuse the existing OAuth token.
 

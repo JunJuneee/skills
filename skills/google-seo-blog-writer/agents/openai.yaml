@@ -1,4 +1,4 @@
 interface:
-  display_name: "Google SEO 블로그 작성"
-  short_description: "검색 의도와 최신성을 반영한 Google SEO 글 작성"
-  default_prompt: "$google-seo-blog-writer로 최신 공식 정보와 이미지 추천을 포함한 한국어 블로그 글을 작성해줘."
+  display_name: "Google SEO 블로그 오케스트레이터"
+  short_description: "글 작성·카드 생성·Blogger API 발행을 조율합니다"
+  default_prompt: "Use $google-seo-blog-writer to create a Korean Google SEO post, generate card news, and save it as a Blogger draft."
