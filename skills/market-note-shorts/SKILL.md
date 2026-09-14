@@ -5,7 +5,9 @@ description: Create and revise Korean vertical financial market-closing shorts i
 
 # Market Note Shorts
 
-Build a verified Korean financial short from facts to a voice-synchronized vertical video. Treat the supplied TTS as the timing authority.
+Build a daily Korean or U.S. market-close short for the Market Note channel. The skill covers current-data research, display copy, Korean pronunciation copy for ElevenLabs, calm card images, social-safe layout, voice-synchronized MP4, separate SRT, thumbnail, captions, and dated archiving.
+
+The user normally wants cards and scripts first. Stop after the image/script package and wait for the user's full TTS MP3 before rendering a synchronized video. Do not infer timing from the script.
 
 ## Load only what is needed
 
@@ -14,13 +16,14 @@ Build a verified Korean financial short from facts to a voice-synchronized verti
 - Read [references/research-and-qa.md](references/research-and-qa.md) when facts must be researched or a rendered video must be accepted.
 - Use the **instagram-reels-publisher** skill when a finished reel must be published to Instagram.
 - Read [references/automation.md](references/automation.md) when the daily episode should run unattended on a schedule.
+- Read [references/market-note-template.md](references/market-note-template.md) when creating a new daily card set or when the user asks to preserve the established template and content conventions.
 - Use [assets/remotion-template](assets/remotion-template) when no working Remotion project exists. Otherwise modify the user's existing project in place.
 
 ## Workflow
 
 ### 1. Establish the content package
 
-Collect the market date, closing values, percentage moves, macro drivers, notable stocks, next-session schedule, and direct source URLs. Verify time-sensitive facts with current primary sources. Do not invent missing values.
+Collect the market date, closing values, percentage moves, market breadth, investor flows, macro drivers, notable stocks, and next-session watch points. For Korea, include KOSPI and KOSDAQ divergence, foreign/institutional/retail flows, leading sectors, and representative movers when available. For the U.S., include the major indices, Russell 2000, rates/oil or another relevant macro driver, sector leadership, and the next-session watch list. Verify time-sensitive facts with current primary sources and cross-check with a reputable close report. Do not invent missing values.
 
 Produce two separate texts:
 
@@ -35,6 +38,18 @@ Prefer one full MP3 rather than sentence clips. Do not overlap or concatenate in
 
 If the user will synthesize the voice, deliver the final TTS script and wait for the MP3. Do not render a final synchronized video from estimated speech timing.
 
+To synthesize with the ElevenLabs API, run:
+
+```bash
+node scripts/synthesize_tts.mjs --text TTS.txt --out AUDIO.mp3 --voice "Kim"
+```
+
+The script resolves the key in this order: `ELEVENLABS_API_KEY` or `ELEVENLABS_KEY` in the environment, then the macOS keychain entry `ELEVENLABS_API_KEY`, then the login shell profile. Use `--dry-run` to check the request without spending credits.
+
+Pass `--voice` either a name or a 20-character `voice_id`. Name lookup calls `/v1/voices` and needs a key with the `voices_read` permission; a text-to-speech-only key must pass the `voice_id` directly. `--list-voices` prints the account's voices and their ids when the permission is present.
+
+Defaults mirror the Market Note ElevenLabs setup: voice `Kim - Neutral, Steady and Calm`, model `eleven_multilingual_v2`, format `mp3_44100_128`, stability `1.0`, similarity `0.18`, style `0.11`, speed `1.2`, speaker boost on. Keep the same voice and settings across a series so consecutive videos sound identical. Re-synthesize the whole script into one file after any script edit; never patch a single sentence into an existing MP3.
+
 ### 3. Analyze actual audio timing
 
 Run:
@@ -43,7 +58,13 @@ Run:
 python scripts/analyze_tts.py AUDIO.mp3 --output timing.json
 ```
 
-If `faster_whisper` is installed in a nonstandard directory, add `--python-path PATH`. The first model download may require network access.
+If `faster_whisper` is installed in a nonstandard directory, add `--python-path PATH`. When it is not installed at all, run the analyzer through uv instead:
+
+```bash
+uv run --with faster-whisper python scripts/analyze_tts.py AUDIO.mp3 --output timing.json
+```
+
+The first model download may require network access.
 
 Use the returned segment start times to locate semantic boundaries. Never reuse timestamps from an older voice file.
 
@@ -69,20 +90,20 @@ Each number is the timing.json segment index that opens a scene, so the count mu
 opening plus one per entry in `scenes`. Cuts land at the midpoint of the pause between
 sentences, and the disclaimer starts at the measured file length.
 
-### 4. Map narration to eight scenes
+### 4. Map narration to scenes
 
-Use this fixed semantic order:
+Use 8 main scenes plus a final silent disclaimer. Keep the number of scenes flexible enough to fit the day's story, but preserve this narrative arc:
 
-1. Opening market summary
-2. Three major indices, narrated as one grouped sentence
-3. Russell 2000 emphasis and why its divergence matters
-4. Single lead-in to the key indicator
-5. Macro card: retail sales, oil, and rate pressure
-6. Stock movers in the exact same order as narration
-7. One-sentence takeaway
-8. Next-week schedule and interpretation
+1. Opening market summary and one-line takeaway.
+2. Main index direction and closing values.
+3. The day's main driver: semiconductors, rates, oil, policy, or another verified catalyst.
+4. Investor flows, breadth, or a second piece of evidence.
+5. Sector or theme contrast.
+6. Movers in the exact same order as narration.
+7. Why the move matters and what was not uniform across the market.
+8. Next-session watch points and a concrete closing sentence.
 
-After the audio ends, show a static disclaimer for 2 seconds with no narration.
+After the audio ends, show a static disclaimer for exactly 2 seconds with no narration. Use the shared Market Note disclaimer template; never switch to a dark, unrelated disclaimer screen.
 
 Compute frames with:
 
@@ -121,7 +142,7 @@ npx remotion render src/index.ts DailyMarketCloseCalm out/market-note-final.mp4 
 
 Keep the standard Shorts composition unchanged. Create a separate social-safe composition with the identical audio, scene timings, narration order, and disclaimer duration.
 
-Apply [references/visual-spec.md](references/visual-spec.md)'s Reels and Shorts safe layout to every scene, including the first frame and disclaimer. Reserve the right action rail as well as the top and bottom overlays. Do not simply reuse the standard Shorts MP4 or crop it. Render and retain both files when the user needs both platforms.
+Apply [references/visual-spec.md](references/visual-spec.md)'s Reels and Shorts safe layout to every scene, including the first frame and disclaimer. Reserve the right action rail as well as the top and bottom overlays. Keep equal left and right margins; leave the lower-right area text-free even if a translucent card background continues behind it. Do not simply reuse the standard Shorts MP4 or crop it. Render and retain both files when the user needs both platforms.
 
 Export the Reels artifacts as:
 
@@ -151,6 +172,15 @@ Inspect stills shortly after every scene boundary, plus the first disclaimer fra
 - The MP4 contains H.264 video and AAC audio at 1080x1920.
 
 For a social-safe companion, inspect the opening, a dense macro or movers scene, and the disclaimer. Confirm that all essential elements stay inside the top, bottom, and right-action-rail safe area and that no platform-style UI is rendered into the video.
+
+### 6a. Cards-first approval gate
+
+When the user asks for “이미지랑 글”, “이미지 먼저”, or an equivalent request:
+
+- create the dated card PNGs and both display/TTS scripts;
+- show a small selection of generated PNGs and provide absolute links to all cards;
+- state that the MP4 is not rendered until the full TTS MP3 is supplied;
+- do not create estimated audio, subtitles, or a final video merely to fill the gap.
 
 ### 7. Archive the deliverables
 
@@ -196,3 +226,13 @@ it is retained with the other deliverables.
 - When Instagram Reels or YouTube Shorts is requested, preserve the standard render and create a separate social-safe render and cover.
 - Report the actual rendered duration to the user.
 - Deliver links from the dated `ai_video` archive path, not from the temporary Remotion output directory.
+
+## Reusable Market Note conventions
+
+- Brand: `Market Note`; Korean header `오늘의 한국 증시`; U.S. header `오늘의 미국 증시`.
+- Canvas: 1080×1920 vertical, 30 fps, calm pale-blue/green gradient, translucent rounded white cards, dark navy ink, blue accents, red negative values, and green positive values.
+- No burned captions by default. Keep SRT separate when requested.
+- Use one continuous ElevenLabs MP3 as the timing authority. Scene cuts follow real pauses and semantic sentence starts. Never overlap voice clips.
+- End narration with an actual outlook sentence. Do not leave an unexplained silent tail before the disclaimer.
+- Archive by session date, not render date: `/Users/jun/Desktop/github/ai_video/korea/YYYY-MM-DD/` or `/Users/jun/Desktop/github/ai_video/america/YYYY-MM-DD/`, with `video/`, `assets/`, `audio/`, `subtitles/`, `scripts/`, and `qa/` only as needed.
+- Use filenames such as `{market}-market-close-YYYY-MM-DD-final.mp4`, `{market}-market-close-YYYY-MM-DD-reels.mp4`, `thumbnail-{market}-market-close-YYYY-MM-DD-reels.png`, and matching scene PNGs.

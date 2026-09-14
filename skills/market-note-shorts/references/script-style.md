@@ -12,23 +12,27 @@ Keep conventional notation in the display script and pronunciation notation in t
 | NASDAQ | 나스닥 |
 | DOW | 다우 |
 | Russell 2000 | 러셀 이천 |
-| 0.2% | 영쩜 이 percent |
-| 0.3% | 영쩜 삼 percent |
-| 0.5% | 영쩜 오 percent |
-| 0.6% | 영쩜 육 percent |
-| 1.7% | 일쩜 칠 percent |
-| 5.1% | 오쩜 일 percent |
-| 12.6% | 십이쩜 육 percent |
-| 2.43% | 이쩜 사삼 percent |
-| 0.38% | 영쩜 삼팔 percent |
-| 3.26% | 삼쩜 이육 percent |
-| 8.24% | 팔쩜 이사 percent |
+| 0.2% | 영쩜 이 프로 |
+| 0.3% | 영쩜 삼 프로 |
+| 0.5% | 영쩜 오 프로 |
+| 0.6% | 영쩜 육 프로 |
+| 1.7% | 일쩜 칠 프로 |
+| 5.1% | 오쩜 일 프로 |
+| 12.6% | 십이쩜 육 프로 |
+| 2.43% | 이쩜 사삼 프로 |
+| 0.38% | 영쩜 삼팔 프로 |
+| 3.26% | 삼쩜 이육 프로 |
+| 8.24% | 팔쩜 이사 프로 |
+| AI | 에이아이 |
+
+When saying `유가`, use `유까` so the final consonant is pronounced naturally by TTS.
 
 ## Punctuation
 
 - Insert exactly one space after `쩜`: `영쩜 이`, not `영쩜이`.
 - When the decimal part has two or more digits, concatenate all decimal digits with no spaces: `이쩜 사삼`, not `이쩜 사 삼`.
-- Write the unit as the English word `percent`, not `퍼센트` or `%`.
+- Write the unit as `프로`, not `percent`, `퍼센트`, or `%`. An English word inside a Korean sentence makes the multilingual model code-switch and the timbre shifts.
+- If percentage narration makes the episode too slow, omit the percentage from TTS and keep the exact percentage visible on the card. Never omit a figure from the display card merely because it was omitted from narration.
 - End sentences with a period.
 - Avoid commas in ordinary prose.
 - Use commas only for genuine lists, including the grouped index sentence.
@@ -38,7 +42,7 @@ Keep conventional notation in the display script and pronunciation notation in t
 ## Preferred grouped-index sentence
 
 ```text
-에쓰앤피 오백은 영쩜 이 percent, 나스닥은 영쩜 삼 percent, 다우는 영쩜 이 percent 하락했습니다.
+에쓰앤피 오백은 영쩜 이 프로, 나스닥은 영쩜 삼 프로, 다우는 영쩜 이 프로 하락했습니다.
 ```
 
 ## Russell emphasis
@@ -46,7 +50,7 @@ Keep conventional notation in the display script and pronunciation notation in t
 Give the divergence enough narration time to support a full card:
 
 ```text
-다만 소형주 러셀 이천은 영쩜 오 percent 올랐습니다.
+다만 소형주 러셀 이천은 영쩜 오 프로 올랐습니다.
 대형주가 하락한 날에도 소형주가 오른 건 시장 전체가 무너지진 않았다는 신호입니다.
 대형주와 흐름이 달랐습니다.
 ```

@@ -12,6 +12,7 @@
 - Preserve the standard Shorts composition and render a separate social-safe version when the user asks for Instagram or YouTube delivery.
 - Keep the top 260 px and bottom 360 px free of essential text, cards, source lines, and progress indicators.
 - Keep the social-safe content frame inside equal left and right margins of at least `84 px` on a 1080 px canvas. Do not create a visibly wider right-side gutter.
+- Keep essential text inside approximately x=84…864. The lower-right action rail may contain the card background, but should contain no labels, values, body copy, or source text.
 - In the lower-right action area, card background may extend when needed, but labels, values, body text, and other essential text must stay to its left. Reflow or left-align lower cards so the platform's like, comment, share, and remix controls never cover words or numbers.
 - Hide the normal header, progress bar, section label, and footer source line in the social-safe version; platform overlays occupy those areas.
 - Move and narrow the card stack with layout positioning. Never use global scale to force it into the safe area.
@@ -54,7 +55,18 @@ Use large type and fewer lines. If content does not fit at these sizes, reduce c
 
 | Scene | Required visual |
 |---|---|
-| Opening | Large one-line market direction and dark summary card |
+## Opening card doubles as the cover
+
+The opening card is the video's cover on every platform, so it must state which session it
+covers. Put the session date on it in `YYYY.MM.DD · 한국 증시` / `· 미국 증시` form, above the
+headline, in the same eyebrow position the label line already occupies. Use the market
+session date, not the render date; for U.S. closes that is the ET trading day.
+
+Export that same frame as the cover file: `assets/thumbnail-{market}-market-close-YYYY-MM-DD.png`.
+Instagram reels take frame 0 as the cover by default, which is this card — keep it that way
+rather than passing a different `--thumb-offset`.
+
+| Opening | Session date, large one-line market direction, and dark summary card |
 | Indices | Three equal cards, grouped index narration |
 | Russell | One dominant positive card with large green `+0.5%` and explanation |
 | Key indicator | Minimal lead-in, usually `핵심은 소매판매` |
