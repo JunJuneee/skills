@@ -1,12 +1,16 @@
 import base64
 import html
 import json
+import os
 import re
 from pathlib import Path
 from urllib.parse import urlencode
 from urllib.request import Request, urlopen
 
-ROOT = Path('/Users/jun/Desktop/skills')
+CREDENTIALS_DIR = Path(os.environ.get('LILIS_BLOGGER_CREDENTIALS_DIR', '/Users/jun/.config/lilis-blog'))
+CLIENT_SECRET_PATH = Path(os.environ.get('GOOGLE_BLOGGER_CLIENT_SECRET', CREDENTIALS_DIR / 'google-client-secret.json'))
+TOKEN_PATH = Path(os.environ.get('GOOGLE_BLOGGER_TOKEN_PATH', CREDENTIALS_DIR / 'blogger-tokens.json'))
+BLOG_ID_CACHE_PATH = Path(os.environ.get('GOOGLE_BLOGGER_BLOG_ID_CACHE_PATH', CREDENTIALS_DIR / 'blog-id-cache.json'))
 SOURCE = Path('/Users/jun/Documents/블로그 포스팅/8월1일_홈쇼핑_시간대별_게시글/8월1일_11시_홈쇼핑_편성표.md')
 ASSETS = Path('/private/tmp/home11')
 TITLE = '8월 1일 11시 홈쇼핑 편성표｜대표상품·함께방송 상품 링크'
@@ -93,10 +97,10 @@ content += image('cta.jpg','8월 1일 홈쇼핑 편성표 더 보기')
 content += '</article>'
 
 expected_alts=re.findall(r'<img[^>]+alt="([^"]+)"',content)
-secret=json.loads(Path('/Users/jun/Downloads/client_secret.json').read_text())
+secret=json.loads(CLIENT_SECRET_PATH.read_text())
 oauth=secret.get('web') or secret.get('installed')
-tokens=json.loads((ROOT/'mcp-blogspot-posting/.blogger-tokens.json').read_text())
-cache=json.loads((ROOT/'mcp-blogspot-posting/.blog_id_cache.json').read_text())
+tokens=json.loads(TOKEN_PATH.read_text())
+cache=json.loads(BLOG_ID_CACHE_PATH.read_text())
 refresh=urlencode({'client_id':oauth['client_id'],'client_secret':oauth['client_secret'],'refresh_token':tokens['refresh_token'],'grant_type':'refresh_token'}).encode()
 with urlopen(Request('https://oauth2.googleapis.com/token',data=refresh,method='POST'),timeout=60) as response:
     token=json.load(response)['access_token']
