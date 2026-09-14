@@ -1,9 +1,9 @@
 ---
 name: kospi-trading-journal
-description: KIS 기반 한국 주식 추세 분석, KOSPI 200 EMA·3 MACD·ATR 선별, 1억원 계좌의 유닛·손절·RR 계산, Obsidian 매매일지 작성, KOSPI 200 Lab 웹 일지 반영을 일관된 규칙으로 수행한다. 사용자가 종목의 현재가·국면·진입 가능 여부·저항 근거·매수 수량을 묻거나, 매매계획/매매일지를 금융/매매일지에 기록하거나, 해당 계획을 웹 차트에 표시해 달라고 할 때 사용한다.
+description: KIS 기반 한국 주식 추세 분석과 매매일지 운영. KOSPI 전체 및 KOSDAQ 바이오·2차전지·소부장 유니버스에서 EMA·3 MACD·ATR로 후보를 선별하고, 1억원 계좌의 유닛·2ATR 손절·수익 청산을 계산하며, Obsidian 매매일지와 Stock Trading 웹 화면을 일관된 규칙으로 반영한다. 사용자가 종목의 현재가·국면·진입 가능 여부·저항 근거·매수 수량을 묻거나, 후보 스크리닝/백필/백테스트, 매매계획·매매일지 기록, 웹 차트 표시를 요청할 때 사용한다.
 ---
 
-# KOSPI Trading Journal
+# Korean Trend Trading Journal
 
 ## 원칙
 
@@ -22,16 +22,16 @@ description: KIS 기반 한국 주식 추세 분석, KOSPI 200 EMA·3 MACD·ATR 
 5. 진입을 제안할 때 눌림 매수와 돌파 매수를 반드시 별도 전략으로 계산한다.
 6. 수량, 최대 손실, 손절, 트레일링, 수익 확정, 추가 조건을 수치화한다.
 7. 기록 요청이면 Obsidian에 종목명만으로 저장한다.
-8. 웹 반영 요청이면 기존 KOSPI 200 Lab을 수정·빌드·비공개 배포한다.
+8. 웹 반영 요청이면 기존 Stock Trading 웹을 수정·빌드·비공개 배포한다.
 
 상세 계산과 판정 기준은 [references/trading-rules.md](references/trading-rules.md)를 읽는다.  
 Obsidian 기록을 만들거나 수정할 때는 [references/journal-template.md](references/journal-template.md)를 읽는다.
 
 ## 데이터 접근
 
-- 로컬 프로젝트: `/Users/jun/Desktop/kis-kospi200-pipeline`
+- 로컬 프로젝트: `/Users/jun/Desktop/github/stock-trading`
 - 로컬 DB: `var/kospi200.sqlite3`
-- 웹 프로젝트: `/Users/jun/Desktop/kis-kospi200-pipeline/web`
+- 웹 프로젝트: `/Users/jun/Desktop/github/stock-trading/web`
 - KIS 환경변수: `KIS_PAPER_KEY`, `KIS_PAPER_SECRET`
 - 환경변수가 일반 셸에 없고 로그인 zsh에는 있으면 `zsh -lic`로 불러온다. 값은 출력하지 않는다.
 - 주식 정보나 거래 코드를 다룰 때 `kis-code-assistant`가 제공되면 먼저 관련 국내주식 API를 검색한다.
@@ -54,4 +54,3 @@ Obsidian 기록을 만들거나 수정할 때는 [references/journal-template.md
 - 종목 선택 시에만 접이식 `금융 / 매매일지` 패널을 표시한다.
 - 웹 규칙도 눌림 매수와 돌파 매수를 서로 다른 카드/섹션으로 보여준다.
 - 프로덕션 빌드 성공 후 기존 비공개 URL에 새 버전을 배포한다.
-
