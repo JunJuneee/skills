@@ -1,0 +1,5 @@
+interface:
+  display_name: "HomeShopick 편성 업로드"
+  short_description: "홈쇼핑 엑셀을 Supabase에 안전하게 업로드"
+  default_prompt: "Use $homeshopping-supabase-import to validate and upload HomeShopick schedule spreadsheets."
+  brand_color: "#0F766E"
