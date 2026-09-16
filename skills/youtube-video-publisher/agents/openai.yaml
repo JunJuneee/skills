@@ -1,0 +1,4 @@
+interface:
+  display_name: "YouTube Video Publisher"
+  short_description: "Authorize, upload, and publish YouTube videos."
+  default_prompt: "Use $youtube-video-publisher to authorize a YouTube channel and upload a video safely."
