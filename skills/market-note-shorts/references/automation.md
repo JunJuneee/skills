@@ -14,14 +14,17 @@ stay where their own tools already read them.
 ```sh
 ARCHIVE_ROOT=/Users/jun/Desktop/github/ai_video
 REMOTION_DIR="/Users/jun/Documents/ChatGPT/금융 쇼츠 제작/remotion-shorts"
-SKILL_DIR=/Users/jun/Desktop/github/skills/skills/market-note-shorts
-YOUTUBE_DIR="/Users/jun/Documents/ChatGPT/금융 쇼츠 제작"
 ELEVENLABS_VOICE_ID=<the Kim voice id>
 STAGING_REPO=JunJuneee/skills
 YOUTUBE_PRIVACY=public
 YOUTUBE_TAGS=마켓노트,증시마감
 NOTIFY_CMD='/Users/jun/claude-agents/.venv/bin/python /Users/jun/claude-agents/lib/notify.py'
 ```
+
+Only paths outside the skill belong here. `SKILL_DIR` is derived from the script's own
+location, and the sibling skills it calls — `youtube-video-publisher` and
+`instagram-reels-publisher` — resolve next to it, so neither needs configuring. Override
+`SKILL_DIR`, `YOUTUBE_SCRIPTS`, or `INSTAGRAM_SCRIPTS` only to point somewhere unusual.
 
 `ELEVENLABS_VOICE_ID` is required because the API key lacks `voices_read`, so the voice
 cannot be looked up by name. `NOTIFY_CMD` is optional; it receives one argument.
@@ -42,7 +45,7 @@ flags, for example `AGENT_CMD="claude -p --permission-mode bypassPermissions --m
 6. Remotion renders `MarketNoteVideo` with `--props` pointing at the episode.
 7. **The gate.** `verify_video.py` plus a publish dry run must both pass, and the cover
    frame is extracted. Nothing below this line runs otherwise.
-8. YouTube upload.
+8. YouTube upload, through the `youtube-video-publisher` skill.
 9. Instagram: stage the file in a GitHub release, publish, delete the release.
 
 Stages 1 to 3 skip when their output already exists, so a rerun after a failure resumes

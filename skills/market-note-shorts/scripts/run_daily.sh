@@ -18,21 +18,24 @@ if [[ "$MARKET" != "korea" && "$MARKET" != "us" ]]; then
   exit 2
 fi
 
+# 이 스크립트는 스킬 안에 있으므로 스킬 경로는 설정이 아니라 자기 위치에서 구한다.
+SKILL_DIR="${SKILL_DIR:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}"
+SKILLS_ROOT="$(cd "$SKILL_DIR/.." && pwd)"
+
 CONFIG="${MARKET_NOTE_ENV:-$HOME/.config/market-note/automation.env}"
 # shellcheck source=/dev/null
 [[ -f "$CONFIG" ]] && source "$CONFIG"
 
 : "${ARCHIVE_ROOT:?set ARCHIVE_ROOT in $CONFIG}"
 : "${REMOTION_DIR:?set REMOTION_DIR in $CONFIG}"
-: "${SKILL_DIR:?set SKILL_DIR in $CONFIG}"
-: "${YOUTUBE_DIR:?set YOUTUBE_DIR in $CONFIG}"
 : "${ELEVENLABS_VOICE_ID:?set ELEVENLABS_VOICE_ID in $CONFIG}"
 : "${STAGING_REPO:?set STAGING_REPO in $CONFIG}"
 # Headless Claude Code. bypassPermissions is what makes it unattended: a scheduled run
 # has nobody to answer a tool prompt, and the job would hang until launchd killed it.
 AGENT_CMD="${AGENT_CMD:-claude -p --permission-mode bypassPermissions}"
 PRIVACY="${YOUTUBE_PRIVACY:-public}"
-INSTAGRAM_SCRIPTS="${INSTAGRAM_SCRIPTS:-$SKILL_DIR/../instagram-reels-publisher/scripts}"
+INSTAGRAM_SCRIPTS="${INSTAGRAM_SCRIPTS:-$SKILLS_ROOT/instagram-reels-publisher/scripts}"
+YOUTUBE_SCRIPTS="${YOUTUBE_SCRIPTS:-$SKILLS_ROOT/youtube-video-publisher/scripts}"
 
 DATE="${2:-$(TZ=Asia/Seoul date +%F)}"
 # The US session that closes overnight belongs to the previous Seoul day.
@@ -142,7 +145,7 @@ ffmpeg -y -v error -i "$VIDEO" -vframes 1 "$EPISODE/assets/thumbnail-$SLUG-reels
 
 # 8. YouTube.
 echo "--- 8/9 publishing to YouTube"
-python3 "$YOUTUBE_DIR/youtube_upload_video.py" "$VIDEO" \
+python3 "$YOUTUBE_SCRIPTS/upload_video.py" "$VIDEO" \
   --title "$(head -n1 "$EPISODE/scripts/$SLUG-title.txt")" \
   --description-file "$EPISODE/scripts/$SLUG-youtube-description.txt" \
   --privacy "$PRIVACY" --tags "${YOUTUBE_TAGS:-마켓노트,증시마감}"
