@@ -7,27 +7,33 @@ session that closed overnight.
 
 ## Configuration
 
-Write `~/.config/market-note/automation.env` with owner-only permissions. It holds a voice
-id and paths, not secrets — the ElevenLabs key, the YouTube token, and the Instagram token
-stay where their own tools already read them.
+There is nothing to configure for a standard setup. `run_daily.sh` defaults to these,
+all relative to `$HOME`:
+
+| | default |
+|---|---|
+| `ARCHIVE_ROOT` | `$HOME/Desktop/github/ai_video` |
+| `REMOTION_DIR` | `$HOME/Documents/market-note/remotion-shorts` |
+| `SKILL_DIR` | derived from the script's own location |
+| `YOUTUBE_SCRIPTS` / `INSTAGRAM_SCRIPTS` | the sibling skills next to `SKILL_DIR` |
+| `STAGING_REPO` | `JunJuneee/skills` |
+| `ELEVENLABS_VOICE_ID` | the Kim voice |
+| `YOUTUBE_PRIVACY` | `public` |
+| `YOUTUBE_TAGS` | `마켓노트,증시마감,주식투자` |
+
+`~/.config/market-note/automation.env` is optional. Write it only to override a default
+— a different archive root, or `YOUTUBE_PRIVACY=unlisted` for a rehearsal:
 
 ```sh
-ARCHIVE_ROOT=/Users/jun/Desktop/github/ai_video
-REMOTION_DIR="/Users/jun/Documents/ChatGPT/금융 쇼츠 제작/remotion-shorts"
-ELEVENLABS_VOICE_ID=<the Kim voice id>
-STAGING_REPO=JunJuneee/skills
-YOUTUBE_PRIVACY=public
-YOUTUBE_TAGS=마켓노트,증시마감
+YOUTUBE_PRIVACY=unlisted
 NOTIFY_CMD='/Users/jun/claude-agents/.venv/bin/python /Users/jun/claude-agents/lib/notify.py'
 ```
 
-Only paths outside the skill belong here. `SKILL_DIR` is derived from the script's own
-location, and the sibling skills it calls — `youtube-video-publisher` and
-`instagram-reels-publisher` — resolve next to it, so neither needs configuring. Override
-`SKILL_DIR`, `YOUTUBE_SCRIPTS`, or `INSTAGRAM_SCRIPTS` only to point somewhere unusual.
+`MARKET_NOTE_ENV` points the script at a different override file. `NOTIFY_CMD` is
+optional; it receives one argument.
 
-`ELEVENLABS_VOICE_ID` is required because the API key lacks `voices_read`, so the voice
-cannot be looked up by name. `NOTIFY_CMD` is optional; it receives one argument.
+No secrets live here. The ElevenLabs key, the YouTube token, and the Instagram token stay
+where their own tools already read them.
 
 The agent stages run headless Claude Code, `claude -p --permission-mode bypassPermissions`,
 with the Remotion project and the skill added as working directories. Bypassing

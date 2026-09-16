@@ -26,14 +26,19 @@ CONFIG="${MARKET_NOTE_ENV:-$HOME/.config/market-note/automation.env}"
 # shellcheck source=/dev/null
 [[ -f "$CONFIG" ]] && source "$CONFIG"
 
-: "${ARCHIVE_ROOT:?set ARCHIVE_ROOT in $CONFIG}"
-: "${REMOTION_DIR:?set REMOTION_DIR in $CONFIG}"
-: "${ELEVENLABS_VOICE_ID:?set ELEVENLABS_VOICE_ID in $CONFIG}"
-: "${STAGING_REPO:?set STAGING_REPO in $CONFIG}"
+# 기본값이 표준 위치를 가리키므로 automation.env 는 선택이다. 다르게 두고 싶을
+# 때만 해당 변수를 덮어쓴다. 비밀값은 여기 없다 — ElevenLabs 키, YouTube 토큰,
+# Instagram 토큰은 각 도구가 원래 읽던 자리에 그대로 둔다.
+ARCHIVE_ROOT="${ARCHIVE_ROOT:-$HOME/Desktop/github/ai_video}"
+REMOTION_DIR="${REMOTION_DIR:-$HOME/Documents/market-note/remotion-shorts}"
+STAGING_REPO="${STAGING_REPO:-JunJuneee/skills}"
+# Kim - Neutral, Steady and Calm. API 키에 voices_read 가 없어 이름으로 조회할 수 없다.
+ELEVENLABS_VOICE_ID="${ELEVENLABS_VOICE_ID:-8yL2rVx40vjDeu5pTbg6}"
 # Headless Claude Code. bypassPermissions is what makes it unattended: a scheduled run
 # has nobody to answer a tool prompt, and the job would hang until launchd killed it.
 AGENT_CMD="${AGENT_CMD:-claude -p --permission-mode bypassPermissions}"
 PRIVACY="${YOUTUBE_PRIVACY:-public}"
+YOUTUBE_TAGS="${YOUTUBE_TAGS:-마켓노트,증시마감,주식투자}"
 INSTAGRAM_SCRIPTS="${INSTAGRAM_SCRIPTS:-$SKILLS_ROOT/instagram-reels-publisher/scripts}"
 YOUTUBE_SCRIPTS="${YOUTUBE_SCRIPTS:-$SKILLS_ROOT/youtube-video-publisher/scripts}"
 
@@ -148,7 +153,7 @@ echo "--- 8/9 publishing to YouTube"
 python3 "$YOUTUBE_SCRIPTS/upload_video.py" "$VIDEO" \
   --title "$(head -n1 "$EPISODE/scripts/$SLUG-title.txt")" \
   --description-file "$EPISODE/scripts/$SLUG-youtube-description.txt" \
-  --privacy "$PRIVACY" --tags "${YOUTUBE_TAGS:-마켓노트,증시마감}"
+  --privacy "$PRIVACY" --tags "$YOUTUBE_TAGS"
 
 # 9. Instagram. Instagram Login fetches the file over HTTPS, so stage it, then remove it.
 echo "--- 9/9 publishing to Instagram"
