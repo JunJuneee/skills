@@ -35,7 +35,7 @@ skills/
 │   ├── analyze_flow.py      # 수급 패턴 분석
 │   └── ...
 ├── memory_templates/        # 메모리 템플릿 (개인정보 제외)
-├── automation/              # launchd 자동화
+├── automation/              # launchd 자동화 (스케줄 전체: automation/SCHEDULES.md)
 ├── docs/                    # 사용법 / 아키텍처
 └── data/                    # DB 스키마
 ```
@@ -73,6 +73,14 @@ cp .env.example .env  # DART API 키 입력
 ### 5. 사용
 - Claude Code에서 "포트폴리오 분석해줘" 입력
 - 또는 `python scripts/portfolio_report.py` 직접 실행
+
+### 6. 자동 실행 (선택)
+프리마켓 08:01 · 마감 15:40 · 5분 가격 모니터 등 정기 잡을 켜려면
+[`automation/SCHEDULES.md`](automation/SCHEDULES.md) 참고.
+```bash
+cp automation/launchd/*.plist ~/Library/LaunchAgents/
+for f in ~/Library/LaunchAgents/com.jun.*.plist; do launchctl bootstrap gui/$UID "$f"; done
+```
 
 ## 🛠️ 의존성
 

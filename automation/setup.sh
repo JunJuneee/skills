@@ -73,11 +73,18 @@ fi
 echo ""
 
 # 5. launchd 자동화 설치 (선택)
-echo "⏰ 5. launchd 자동 수집 설치 (선택)..."
-echo "  매일 18:00 자동 수집 활성화하려면:"
-echo "    cp automation/launchd/com.jun.krx-flow-collect.plist ~/Library/LaunchAgents/"
-echo "    launchctl load ~/Library/LaunchAgents/com.jun.krx-flow-collect.plist"
-echo "  (먼저 plist 파일 내 경로를 본인 환경에 맞게 수정 필요)"
+echo "⏰ 5. launchd 자동 실행 설치 (선택)..."
+echo "  등록 가능한 잡 (스케줄 상세: automation/SCHEDULES.md):"
+for p in "$REPO_DIR/automation/launchd"/*.plist; do
+    echo "    - $(basename "$p" .plist)"
+done
+echo ""
+echo "  전체 등록:"
+echo "    cp automation/launchd/*.plist ~/Library/LaunchAgents/"
+echo "    for f in ~/Library/LaunchAgents/com.jun.*.plist; do launchctl bootstrap gui/\$UID \"\$f\"; done"
+echo ""
+echo "  (먼저 plist 내 /Users/jun 경로를 본인 환경에 맞게 수정 필요)"
+echo "  ※ 잡이 안 돌면 launchctl print-disabled gui/\$UID | grep com.jun 먼저 확인"
 echo ""
 
 echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
