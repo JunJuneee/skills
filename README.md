@@ -21,6 +21,7 @@ skills/
 │   ├── krx-flow/                    # 수급 입력/분석
 │   ├── premarket-analyst/           # 프리마켓 분석
 │   ├── financial-analyst/           # CFA 재무 분석 (dart-insight 사용)
+│   ├── finance-bot-automation/      # 정기 잡 진단·복구 (launchd)
 │   └── external/                    # 외부 제공 스킬 (백업)
 │       └── chart-analyst/           # 5단계 차트 분석 v1.8
 ├── dart-insight/                    # DART 재무 분석 엔진 (financial-analyst 의존)

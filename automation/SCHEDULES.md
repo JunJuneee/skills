@@ -7,6 +7,9 @@
 > cron을 쓰지 않는 이유는 (1) 슬립 복귀 후 놓친 잡 처리, (2) `KeepAlive`로 상시 프로세스
 > 관리, (3) 잡별 stdout/stderr 로그 경로 분리가 launchd에서만 깔끔하게 되기 때문이다.
 
+> 진단·복구를 Claude에게 시키려면 [`skills/finance-bot-automation`](../skills/finance-bot-automation/SKILL.md)
+> 스킬을 쓴다. 이 문서는 그 스킬이 참조하는 원본이다.
+
 ---
 
 ## 전체 스케줄 한눈에
