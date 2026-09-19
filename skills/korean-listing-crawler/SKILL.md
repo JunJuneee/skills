@@ -7,6 +7,8 @@ description: Build or extend a daily-refreshed crawler that pulls the same kind 
 
 A pipeline that turns "several sites list overlapping things, in Korean, with inconsistent titles and coordinates" into one clean, deduplicated, incrementally-refreshed SQLite table. Every rule below exists because a real run produced a real wrong answer without it — read the reference file for the stage you're on rather than front-loading all of them.
 
+**Reference implementation**: `github.com/JunJuneee/popup-radar` (private), under `crawler/` — the pop-up-store tracker this skill was distilled from. That subfolder is a version-controlled snapshot for backup/reading; the actual daily-run instance lives locally outside the repo's checkout path (see the `~/Desktop` warning in §6) and isn't kept in automatic sync with it — a change made to the running scripts has to be copied over manually if it should also update the tracked copy.
+
 ## The pipeline
 
 1. **Per-source fetch strategy** (below) → 2. **Incremental fetch, not full re-fetch** (below) → 3. **Cross-source dedup** (`references/dedup-matching.md`) → 4. **Field-merge trust ranking** (below) → 5. **Normalization** (`references/normalization.md`) → 6. **Daily unattended run** (below)
