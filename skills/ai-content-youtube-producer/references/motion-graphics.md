@@ -2,7 +2,7 @@
 
 Built once as a standalone A/B/C/D comparison file for the episode-1 GDP-vs-wages reversal (`+32.4%` GDP, `−11.5%` wages), then reused as the pattern for every other key-graphic decision in the episode. Each variant's code below is the actual working implementation, not a description — copy the shape, not just the idea.
 
-Shared setup: `var GOOD = 32.4, BAD = -11.5;` and the usual `pr(t,a,b)` / `outCubic(x)` local-progress helpers from `ai-content-youtube-producer`'s render-engine pattern. A `showTab(t)` function toggles which `<div class="layer">` is `display:flex` vs `none` and resets `T = 0` on switch, so scrubbing one variant never leaves stale animation state bleeding into the next.
+Shared setup: `var GOOD = 32.4, BAD = -11.5;` and the usual `pr(t,a,b)` / `outCubic(x)` local-progress helpers from `youtube-video-pipeline`'s render-engine pattern. A `showTab(t)` function toggles which `<div class="layer">` is `display:flex` vs `none` and resets `T = 0` on switch, so scrubbing one variant never leaves stale animation state bleeding into the next.
 
 ## A — Count-up
 
@@ -38,7 +38,7 @@ var nOn = Math.floor(GOOD_N * p1);        // reveal count-of-100 dots progressiv
 goodDots.forEach(function(d,i){ d.style.background = i<nOn ? 'var(--v-good)' : 'var(--v-line)'; });
 el('gLabel').textContent = nOn;           // the number label tracks the same nOn, never drifts from the dot count
 ```
-Build all 100 cells once (`buildGrid`), never rebuild the grid per frame — only flip each cell's background based on its index against the current reveal count. Verifying this one is a pure DOM read: `document.querySelectorAll('.dot').filter(lit).length === Math.round(targetValue)` at the final frame, per `ai-content-youtube-producer`'s verification method — don't trust that the code "looks like" it rounds correctly, count the actual lit elements.
+Build all 100 cells once (`buildGrid`), never rebuild the grid per frame — only flip each cell's background based on its index against the current reveal count. Verifying this one is a pure DOM read: `document.querySelectorAll('.dot').filter(lit).length === Math.round(targetValue)` at the final frame, per `youtube-video-pipeline`'s verification method — don't trust that the code "looks like" it rounds correctly, count the actual lit elements.
 
 ## D — Camera push-in
 
@@ -56,4 +56,4 @@ Beyond this standalone 4-variant demo, the episode itself needed two more graphi
 - **GDP three-stage reveal** — A: a horizontal bar fills in per scenario in sequence (same visual grammar as the other channel's bars, for consistency across this producer's channels); B: three numbers count up simultaneously; C: each scenario enlarges in turn (camera-push-in family).
 - **Labor-vs-capital-share reversal** — marked in the storyboard as *this episode's single most important graphic*, so it got three candidate treatments: A: a 100%-stacked bar across three scenarios; B: a pie/donut that splits differently per scenario; C: a 0-baseline diverging bar (same grammar as variant B above, reused for a different metric).
 
-Neither of these two was resolved to a single final version as of the last working session — both switchers are still live in the prototype. Before shipping, pick one variant per switcher, delete the losing branches and the tab UI itself, and re-verify the survivor alone (a leftover switcher button is exactly the kind of small stacked-overlay element `ai-content-youtube-producer`'s verification method warns about).
+Neither of these two was resolved to a single final version as of the last working session — both switchers are still live in the prototype. Before shipping, pick one variant per switcher, delete the losing branches and the tab UI itself, and re-verify the survivor alone (a leftover switcher button is exactly the kind of small stacked-overlay element `youtube-video-pipeline`'s verification method warns about).

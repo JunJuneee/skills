@@ -1,53 +1,70 @@
 ---
 name: business-content-youtube-producer
-description: Plan or extend the "AI 산업·경제 뉴스 해설" YouTube track — a no-host channel that analyzes authoritative primary sources (a company's own report, an executive's talk, a research paper) about AI's effect on work, organizations, and the economy, always anchored in a concrete numeric reversal. Use when the user wants to pick a topic, write a title, or set the look/motion for THIS specific channel/track (not a different explainer channel) — e.g. "이 AI경제 채널에 새 편 기획해줘", "AgentOS 스타일로 오프닝 만들어줘", "이 리포트로 이 트랙 영상 만들어줘". For the shared how-to (research method, script timing math, storyboard, the render-engine pattern, verification) use `ai-content-youtube-producer` — load that skill for the mechanics and load this one only for what's specific to this channel's identity: its reference channel, title formulas, color system, and motion inspiration.
+description: Plan or extend "가격표 뒤에 있는 것" — a no-host YouTube channel that decomposes an everyday price or business fee structure (a delivery fee, a coffee price, an airfare) into where the money actually goes, backed only by public-institution/primary-source numbers. Use when the user wants to pick a topic, write a title, or set the look/motion for THIS specific channel/track (not a different explainer channel) — e.g. "이 배달비 채널에 새 편 기획해줘", "바비노트 스타일로 제목 뽑아줘", "이 리포트로 가격표 채널 영상 만들어줘". For the shared how-to (research method, script timing math, storyboard, the render-engine pattern, verification) use `youtube-video-pipeline` — load that skill for the mechanics and load this one only for what's specific to this channel's identity: its reference channels, title formulas, niche, design tokens, and the concrete rendering bugs this channel actually hit.
 ---
 
-# Business/AI-Economy YouTube Track
+# "가격표 뒤에 있는 것" — Price/Fee-Structure YouTube Track
 
-This is a **channel bible**, not a how-to. Everything about *how* to research, script, storyboard, prototype, and verify an explainer episode already lives in `ai-content-youtube-producer` — load that skill first for the mechanics and come back here only for what makes *this* channel this channel.
+This is a **channel bible**, not a how-to. Everything about *how* to research, script, storyboard, prototype, and verify an explainer episode already lives in `youtube-video-pipeline` — load that skill first for the mechanics and come back here only for what makes *this* channel this channel.
 
-This track was deliberately split off from the other active channel ("가격표 뒤에 있는 것", a faceless price-breakdown channel) after research showed macro/AI-tool-demo content flops in *that* channel's niche — but "AI's effect on work/organizations, argued from an authoritative primary source" tested as a different, working sub-genre worth its own track.
+## Reference channels & the niche decision
 
-## Reference channel & what actually works in it
+Three real channels were surveyed by scrolling their `/videos` tabs and classifying recent uploads into topic buckets, then comparing median views per bucket (41 videos across all three):
 
-**AgentOS** (@ai-AgentOS, ~20k subscribers, "AI 에이전트 시대의 생존 가이드"). Sorting its own upload history by views: everything in the 20k–180k range is an analysis of a named authority or company's own primary material (a talk, an internal document, a study) reduced to one concrete number. AI-video-generation-tool demo/tutorial videos on the same channel sit at 1k–4k — the exact same pattern the price-breakdown channel's research found in an unrelated niche, which is why it's trusted here rather than treated as a coincidence. **Never pick an AI-tool-demo topic for this track.**
+- **김바비의 바비위키** (@김바비, 19.5만 구독, 218 videos) — "바비노트" sub-series.
+- **오그랲** (@5graph-o6o, SBS 비디오머그 co-production) — higher-budget, dramatized B-roll.
+- **머니스웨거** (@MoneySwagger, 38.7만 구독, 269 videos) — the sharpest internal contrast: its own AI-tool-demo videos sit at 1.5k–3k views while its price/business-structure videos (호텔의 경제학, 불꽃축제 예산) hit 6万–96万.
 
-### Title formulas (extracted from AgentOS's actual titles)
+Median views by topic bucket (this channel's own research, not a general claim):
 
-1. [authority/company] did [thing] — [numeric reversal]
-2. [company] analyzed [large dataset] and found — [counterintuitive result]
-3. [named person]'s [format] — [one-line quotable claim]
-4. A clean sample size + experiment result, stated as the whole title
-5. [person] did [an unexpected thing]
-
-Run a candidate topic through all five before committing to a title — the numeric-reversal formulas (#1, #2) are the ones that actually clustered at the top of the view distribution.
-
-## Design tokens for this track
-
-- Background `#0A0D14` (deep navy-black).
-- Two-color semantic pair, **not** a single accent: `#33B0FF` electric blue = good news/growth, `#FF5C6C` warning red = bad news/decline. Chosen specifically to not collide with AgentOS's own orange or the other channel's amber — check your own reference channels' accents before reusing either of these verbatim on a third channel.
-- Hand-drawn-style single-stroke line icons (see `ai-content-youtube-producer`'s stock-photo-substitute pattern) over a persistent top-left `SOURCE · <name>` watermark.
-- Report-explainer pacing runs slower than a fast-cut channel: capture cuts (report cover, reviewer list, a "v1.0" version label, a survey methodology page) need **6–7s minimum**, not the ~4s average shot length that works for a faceless price-breakdown channel — confirmed against AgentOS's own actual cut lengths, not assumed. Don't force this track's pacing to match a different channel's rhythm just because both are "no-host explainer."
-
-## Motion inspiration beyond the reference channel
-
-AgentOS alone under-delivers on motion variety — an early draft built entirely from it drew the specific feedback "심심하다" (flat/boring). Three more channels, each contributing one distinct technique already generalized in `ai-content-youtube-producer`'s `references/design-and-motion.md`:
-
-| Channel | What to borrow |
+| Bucket | Median views |
 |---|---|
-| Johnny Harris | Camera push-in / pull-back on a single static graphic — cinematic transitions between beats |
-| Wendover Productions / Economics Explained | Count-up numbers; diverging 0-baseline "bar race" reveals |
-| Half as Interesting | Dot/icon-grid pictograms for a share-of-total that's hard to feel as a bar |
+| 기업의 몰락과 부활 | 23만 |
+| **일상의 가격과 구조 (chosen)** | 16만 |
+| 숨은 산업 | 6.2만 |
+| 거시경제·정책·투자 | 4.8만 |
+| AI 툴 리뷰·튜토리얼 | 1.5만 |
 
-When a key numeric reversal is the episode's single most important graphic, build the count-up, diverging-bar, dot-grid, *and* camera-push-in treatments of it as switchable variants in one file (per `ai-content-youtube-producer`'s side-by-side comparison pattern) rather than guessing which one lands best. Episode 1 used this for two separate decision points — a GDP three-stage reveal and the labor-vs-capital-share reversal (its single most important graphic) — each with its own switcher, left unresolved (switcher still live, no variant deleted yet) until the user picks a winner.
+**"기업의 몰락과 부활" scores higher but was deliberately not chosen**: its top values are news-driven (a real regulatory event, a real scandal) and don't repeat on demand, and both reference channels already have 200+ videos of it — a new channel competing head-on there loses by default. "일상의 가격과 구조" is chosen instead because (a) it's the only bucket where infographics *are* the star rather than a supporting visual for a talking head, which converts this channel's lack of an on-camera host from a weakness into a fit, and (b) the underlying subject (every priced thing) never runs out, unlike a finite list of companies to autopsy.
 
-## Episode 1 (built)
+**Never pick a macro/investment-commentary or AI-tool-demo topic for this track** — both bucket at the bottom regardless of channel, confirmed independently on all three references.
 
-**"AI가 자기 미래를 예측한 방식"** — an explainer of Anthropic's Econ Scenario Explorer v1.0. The numeric reversal the whole episode is built around: in the extreme scenario, GDP is **+32.4%** while knowledge-worker wages are **−11.5%**, and capital's share of income rises to **54.8%**. Script: ~9:37 runtime, 3,257 characters — use this as a real reference point for this track's own pacing (compare against the character-per-second math in `ai-content-youtube-producer`'s script stage, since a report-heavy script with long capture dwell times runs slightly different from that skill's general estimate).
+### Content angles (mix, not pure repetition)
 
-**How to apply for the next episode**: pick a new primary source (a report, a talk, an internal dataset — not a tool demo), run the candidate title through the five formulas above, and reuse this file's color tokens and reference-channel motion list rather than re-deriving them. Channel name/branding is still unset — decide it before publishing, not before prototyping.
+1. **분해 (Decompose) — 60%.** "이 돈은 어디로 갔나." A single price, itemized by real institutional data.
+2. **공짜의 이유 (Why free) — 20%.** Something priced at zero has a reason; find who's actually paying.
+3. **가격의 역설 (Paradox) — 20%.** Same item, different price, and why that's not irrational.
 
-See `references/motion-graphics.md` for how the four episode-1 graphics (count-up, diverging bar, dot grid, camera push-in) were actually implemented and which one won.
+### Title formulas (extracted from 바비노트's actual titles)
 
-Relies on: `ai-content-youtube-producer` (pipeline, script timing, storyboard cut types, the `render(t)` engine pattern, SVG-first rule, verification method).
+1. [통념]이라는 착각 — e.g. "줄서기는 공정하다는 착각"
+2. [주체]가 [상태]할 수 없는 이유 — e.g. "나이키가 전성기로 돌아갈 수 없는 이유"
+3. [비난받는 행동], 사실 [반박]입니다 — e.g. "같은 게임만 만드는 게임사들, 멍청한 게 아닙니다"
+4. 이 [대상]이 진짜로 파는 건 [예상]이 아닙니다 — e.g. "이 헬스장이 진짜로 파는 건 운동이 아닙니다"
+5. [행동]하던 [익명 주체]가 [사건] 당하면 생기는 일 — e.g. "꼼수로 장사하던 회사가 제재를 당하면 생기는 일"
+
+Run a candidate topic through all five before committing.
+
+### Topics already covered by the reference channels (avoid repeating)
+
+헬스장 회원권, 공항 라운지, 항공 마일리지, 줄서기·프리미엄 패스, 아이스크림 냉동고, 휘발유·경유 가격, 복권, 호텔 객실, 불꽃축제, 도심 주차장, 자판기, 편의점 전략, F1, 아이맥스. Check a new candidate against this list first — it grows every time a reference channel's `/videos` tab is re-surveyed, so re-check periodically rather than trusting this snapshot forever.
+
+## Design tokens (A variant — locked; do not re-propose)
+
+**Typeface is locked and out of scope for future redesign discussion**: IBM Plex Sans KR (body/captions) + IBM Plex Mono (numbers, receipt body, labels) — confirmed explicitly by the user ("서체는 딱 좋아") after a side-by-side comparison. Never propose a different typeface for this channel; vary color/layout/motion instead if a redesign is asked for.
+
+- Background `#14161A` (dark ink stage — a desk in a dim room, receipts are physical objects placed on it).
+- Receipt paper `#F4F1EA`, ink-on-paper `#1A1A18` / `#6B665C`.
+- **Accent encodes direction, not decoration**: `#E9A13B` (amber) = an amount that *increased*; `#79828D` (muted grey) = an amount that *decreased*. A falling number is not automatically "good news" in this channel's framing (e.g. a delivery fee falling while the total paid rises) — grey marks the smaller/receding number, amber marks the one the episode wants attention on, independent of whether that's ostensibly good or bad for the viewer.
+- Both reference channels above use the same neon-green accent — this channel's amber was picked specifically to not sit next to it.
+- A **B variant** (bright paper-white background, the whole frame *is* a document, red ink-stamp accent, hand-drawn pen-circle reveals instead of zoom) was prototyped side-by-side and **not chosen** — kept only as an archived alternative, not a default to revert to.
+
+## Episode 1 (built) — "배달비 3,000원은 누가 나눠 갖나"
+
+The reversal the episode is built around, sourced only from public institutions (배민 공식 요금 안내, 서울시 배달플랫폼 상생지수, 참여연대 실측 매입내역, 국토부 실태조사— never an estimate): the *listed* delivery fee fell **3,000원 → 1,990원**, but the same order's *total paid* rose **15,000원 → 17,990원** in the same period — the fee didn't disappear, it moved into the base price and a subscription. Script: ~2,900자 → real ElevenLabs audio ran **27% longer** than the character-count estimate once every number was spelled out phonetically for the TTS (see `youtube-video-pipeline` §8 for why real audio always runs long) — use 27% as a sanity-check margin for this channel's own future estimates, not a universal constant.
+
+**How to apply for the next episode**: pick a new everyday price, run it through the three angles and five title formulas above, and reuse this file's color tokens rather than re-deriving them.
+
+See `references/svg-first-lessons.md` for the exact rendering bugs this channel hit and fixed (all in the "anything with a direction" category `youtube-video-pipeline` warns about in the abstract — these are the concrete before/after). See `references/verification-tooling.md` for the automated check that was actually built here and the real bug it caught after the fact.
+
+Relies on: `youtube-video-pipeline` (pipeline, script timing, storyboard cut types, the `render(t)` engine pattern, SVG-first rule, verification method).
