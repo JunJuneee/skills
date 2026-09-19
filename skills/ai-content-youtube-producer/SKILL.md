@@ -1,5 +1,5 @@
 ---
-name: youtube-explainer-producer
+name: ai-content-youtube-producer
 description: Plan and prototype a no-host, data/report-driven explainer YouTube video or channel end-to-end — reference-channel research, topic/niche strategy from viewcount data, verified-fact scriptwriting with duration math, storyboard/cut-sheet breakdown, a design token system, and a working HTML/JS motion-graphic prototype that is rigorously verified before handing off to ElevenLabs+Remotion production. Use this whenever the user wants to start a new YouTube channel or episode, write a script for one, storyboard or "cut" a video, design its visual look, prototype an opening or a chart animation, compare title/channel references, or asks to verify that a chart or motion graphic isn't buggy/awkward before rendering — even if they only say "이 리포트로 영상 만들어줘", "오프닝 만들어봐", "대본 써줘", "컷 시트 뽑아줘", or "이상하지 않은지 확인해줘", since each of those is one stage of this same pipeline. Do NOT use for the ElevenLabs TTS timing / Remotion render step itself — that is the separate market-note-shorts skill, which this skill hands off to at the end.
 ---
 
