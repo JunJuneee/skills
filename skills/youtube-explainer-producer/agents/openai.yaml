@@ -1,0 +1,4 @@
+interface:
+  display_name: "YouTube Explainer Producer"
+  short_description: "Plan and prototype a no-host, data-driven explainer video before production."
+  default_prompt: "Use $youtube-explainer-producer to research reference channels, write a verified-fact script, build a cut sheet, and prototype the motion graphics for a new episode."
