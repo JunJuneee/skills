@@ -40,6 +40,10 @@ version: 1.0
 
 launchd `Weekday`는 **1=월 … 5=금, 6=토, 0/7=일**. cron(`0=일`)과 기준이 다르다.
 
+plist는 있지만 등록 안 된 잡이 3개 더 있다 (`portfolio` · `selltrigger` · `watchlist`).
+프롬프트만 보고 도는 줄 오해하기 쉬우니
+[SCHEDULES.md 미설치 잡](../../automation/SCHEDULES.md#미설치-잡-plist는-있으나-등록-안-됨)을 확인한다.
+
 ---
 
 ## 진단 절차
@@ -124,6 +128,68 @@ done
 launchctl bootout   gui/$UID/com.jun.claude.closing
 launchctl kickstart -p gui/$UID/com.jun.claude.closing
 ```
+
+---
+
+## 프롬프트
+
+잡이 실행하는 프롬프트 사본을 [`prompts/`](prompts/)에 둔다.
+
+| 파일 | 쓰는 잡 | 성격 |
+|---|---|---|
+| [`premarket.md`](prompts/premarket.md) | `premarket` (08:01) | 간밤 미장 + 보유·관심 프리뷰 + 오늘 전략 |
+| [`portfolio.md`](prompts/portfolio.md) | `closing` (15:40) | 종가 점검, chart-analyst v1.8 카드 형식 |
+| [`marketnote_kr.md`](prompts/marketnote_kr.md) | `marketnote-kr` (16:00) | 한국 마감 숏츠 제작·발행 7단계 |
+| [`marketnote_us.md`](prompts/marketnote_us.md) | `marketnote-us` (07:00) | 미국 마감 숏츠 제작·발행 7단계 |
+| [`sell-trigger.md`](prompts/sell-trigger.md) | `selltrigger` (**미설치**) | 장중 트리거 감시, 미충족 시 `NO_ALERT` |
+| [`watchlist.md`](prompts/watchlist.md) | `watchlist` (**미설치**) | 아침 브리핑. 수동 테스트용으로도 쓴다 |
+
+### ⚠️ 이 사본은 런타임이 아니다
+
+**잡은 `~/claude-agents/prompts/`를 읽는다.** 레포의 `prompts/`는 사본이라, 여기만
+고치면 봇 동작은 하나도 안 바뀐다. 프롬프트를 수정할 때는 양쪽을 맞춘다.
+
+```bash
+# 런타임 -> 레포 (사본 갱신)
+cp ~/claude-agents/prompts/*.md skills/finance-bot-automation/prompts/
+
+# 레포 -> 런타임 (수정분 반영)
+cp skills/finance-bot-automation/prompts/*.md ~/claude-agents/prompts/
+
+# 어긋났는지 확인
+diff -rq ~/claude-agents/prompts skills/finance-bot-automation/prompts
+```
+
+### 출력 계약 — 함부로 고치면 알림이 깨진다
+
+`premarket.md`와 `portfolio.md`의 출력 규칙은 `premarket_send.py` ·
+`closing_send.py`의 전송 구조와 맞물려 있다. 다음 세 가지는 스타일이 아니라 계약이다.
+
+- **첫 줄은 `📌 `로 시작하는 60자 이내 한줄요약.** 이 줄을 그대로 떼어 메인 채널
+  헤더로 보내고, 거기에 쓰레드를 파서 나머지를 붙인다. 프롬프트가 "분석하겠습니다"
+  같은 서두를 뱉으면 헤더가 그 문장으로 나간다. 그래서 **서두·머리말 금지**가
+  프롬프트에 박혀 있다.
+- **마크다운 표 금지.** 디스코드가 렌더링을 못 해 깨져 보인다. 숫자 비교는 `•` 불릿.
+- **종목 카드는 `💵 📈 ⚡ ⚖️` 라벨 4줄형.** `[1]`, `[2]` 인덱스 금지.
+
+색은 **한국식 🔴상승 / 🔵하락**이다 (미국 증시에도 동일 적용). 면책·디스클레이머
+문구는 붙이지 않는다 — 본인만 보는 채널이라 의도적으로 금지해둔 것이다.
+
+`portfolio.md`에는 **수급(외국인/기관)은 17:30~18:00에 KRX에서 확정**되므로 15:40
+시점 분석에 넣지 말라는 규칙도 있다. "수급 미반영"을 결함처럼 언급하는 것 자체를
+막아둔 것이라, 이걸 빼면 매일 불필요한 단서가 붙는다.
+
+### `marketnote_*.md`는 헤드리스 실행 규칙이 핵심
+
+두 숏츠 프롬프트에는 사람이 없는 실행을 전제한 규칙이 들어 있다.
+
+- **작업이 남은 채로 턴을 끝내지 않는다.** "렌더 중입니다"로 응답을 마치면 그
+  시점에 프로세스가 죽어 파이프라인이 중단된다. 마지막 줄 `RESULT | ...`를 출력한
+  뒤에만 끝낸다.
+- **백그라운드 실행 금지, 타임아웃 명시.** Remotion 렌더가 3분 이상이라 Bash
+  타임아웃을 900000(15분) 이상으로 준다.
+- **이어받기.** 시작 전 오늘 날짜 아카이브를 확인해 이미 만들어진 단계는 건너뛴다.
+  직전 실행이 중간에 끊겼을 수 있다.
 
 ---
 

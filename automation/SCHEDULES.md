@@ -58,6 +58,7 @@ launchd `Weekday`는 **1=월 … 5=금, 6=토, 0 또는 7=일**이다. cron의 `
 
 1. `kis/premarket.py` 실행 → 보유 종목 프리마켓 가격 + 수급
 2. `claude -p prompts/premarket.md` 실행 → 시황 분석 (한줄요약 + 상세)
+   (프롬프트 사본: [`premarket.md`](../skills/finance-bot-automation/prompts/premarket.md))
 3. 봇 API로 메인 채널에 헤더(한줄요약) 전송 → `message_id` 반환
 4. 같은 봇 토큰으로 그 `message_id`에 쓰레드 생성
 5. 쓰레드에 시황 상세 + 보유 종목 프리마켓 정보를 분할 전송
@@ -71,6 +72,7 @@ launchd `Weekday`는 **1=월 … 5=금, 6=토, 0 또는 7=일**이다. cron의 `
 
 1. `kis/closing.py` 실행 → 보유 종목 종가/등락/RSI/이격도
 2. `claude -p prompts/portfolio.md` 실행 → v1.8 5단계 분석
+   (프롬프트 사본: [`portfolio.md`](../skills/finance-bot-automation/prompts/portfolio.md))
 3~5. 헤더 → 쓰레드 생성 → 상세 분할 전송 (premarket과 동일)
 
 15:40인 이유는 정규장 마감(15:30) 직후 종가가 확정되는 시점을 잡기 위해서다.
@@ -95,7 +97,8 @@ launchd `Weekday`는 **1=월 … 5=금, 6=토, 0 또는 7=일**이다. cron의 `
 
 ### `marketnote-kr` / `marketnote-us` — 숏츠 자동 제작·발행
 
-`run-shorts.sh <에이전트이름> <프롬프트파일>`로 실행된다. 읽기 전용 리포트용
+`run-shorts.sh <에이전트이름> <프롬프트파일>`로 실행된다. 프롬프트 사본은
+[`marketnote_kr.md`](../skills/finance-bot-automation/prompts/marketnote_kr.md) · [`marketnote_us.md`](../skills/finance-bot-automation/prompts/marketnote_us.md). 읽기 전용 리포트용
 `run-agent.sh`와 달리 이 러너를 쓰는 이유는:
 
 - 허용 도구에 Write/Edit와 `npx`/`ffmpeg`/`uv`/`gh`가 포함된다 (파일 생성 · Remotion 렌더 · 유튜브/인스타 업로드에 필요)
@@ -136,6 +139,28 @@ SQLite(`data/krx_flow.db`)에 적재한다. `krx-flow` 스킬이 이 DB를 읽�
   15초(`ThrottleInterval`) 후 되살린다. **이게 꺼져 있으면 스케줄 잡이 정상
   실행돼도 알림이 안 온다.**
 - `keepalive`: `caffeinate -ims`. 맥이 슬립에 들어가면 예약 잡이 밀리므로 막아둔다.
+
+---
+
+## 미설치 잡 (plist는 있으나 등록 안 됨)
+
+`~/claude-agents/launchd/`에 plist가 있지만 `~/Library/LaunchAgents/`로 복사되지
+않아 한 번도 돌지 않는 잡들이다. 프롬프트만 보고 "이것도 도는구나"로 오해하기 쉬워
+따로 적어둔다.
+
+| 잡 | 프롬프트 | 원래 시각 | 상태 |
+|---|---|---|---|
+| `com.jun.claude.portfolio` | `portfolio.md` | 월~금 16:00 | `closing`(15:40)이 같은 프롬프트를 쓰므로 대체된 것으로 보인다 |
+| `com.jun.claude.selltrigger` | `sell-trigger.md` | 월~금 10:00 · 12:00 · 14:00 | 미설치. 장중 감시는 현재 `monitor`가 대신한다 |
+| `com.jun.claude.watchlist` | `watchlist.md` | 월~금 08:30 | 미설치. `premarket`(08:01)과 역할이 겹친다 |
+
+**이 세 개의 plist는 의도적으로 `automation/launchd/`에 넣지 않았다.** 설치 명령이
+`cp automation/launchd/*.plist ~/Library/LaunchAgents/`라서, 넣어두면 전체 등록 시
+원치 않게 같이 켜진다. 살리려면 `~/claude-agents/launchd/`에서 직접 복사한다.
+
+> 참고: `~/claude-agents/launchd/`가 사용자 환경의 plist 원본이다. 2026-09-20 대조
+> 결과 금융 잡은 설치본과 원본이 전부 일치했고, squad 계열 6개만 `ProgramArguments`가
+> 어긋나 있었다 (금융 봇 범위 밖이라 손대지 않음).
 
 ---
 
