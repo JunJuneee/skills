@@ -39,8 +39,14 @@ ELEVENLABS_VOICE_ID="${ELEVENLABS_VOICE_ID:-8yL2rVx40vjDeu5pTbg6}"
 AGENT_CMD="${AGENT_CMD:-claude -p --permission-mode bypassPermissions}"
 PRIVACY="${YOUTUBE_PRIVACY:-public}"
 YOUTUBE_TAGS="${YOUTUBE_TAGS:-마켓노트,증시마감,주식투자}"
-INSTAGRAM_SCRIPTS="${INSTAGRAM_SCRIPTS:-$SKILLS_ROOT/instagram-reels-publisher/scripts}"
 YOUTUBE_SCRIPTS="${YOUTUBE_SCRIPTS:-$SKILLS_ROOT/youtube-video-publisher/scripts}"
+INSTAGRAM_SCRIPTS="${INSTAGRAM_SCRIPTS:-$SKILLS_ROOT/instagram-reels-publisher/scripts}"
+# Instagram Login (graph.instagram.com) rejects upload_type=resumable outright — every
+# API version answers "the parameter video_url is required" — so publish_reels.py needs
+# a public URL (staged below via a GitHub release) rather than a local file path.
+# publish_instagram_reel.mjs's disk-upload approach does not work; do not switch back to it.
+export IG_ACCESS_TOKEN="${IG_ACCESS_TOKEN:-$INSTAGRAM_MARKETNOTE_TOKEN}"
+export IG_USER_ID="${IG_USER_ID:-17841439918892352}"
 
 DATE="${2:-$(TZ=Asia/Seoul date +%F)}"
 # The US session that closes overnight belongs to the previous Seoul day.
@@ -79,7 +85,9 @@ trap 'on_error $LINENO' ERR
 run_agent() {
   # $1 = prompt. The agent runs inside the archive so relative paths resolve, and needs
   # the Remotion project and the skill on top of that to write the episode file.
-  ( cd "$EPISODE" && $AGENT_CMD --add-dir "$REMOTION_DIR" --add-dir "$SKILL_DIR" "$1" )
+  # The prompt must precede --add-dir: --add-dir is variadic, so a prompt placed after it
+  # gets swallowed into its directory list instead of reaching claude as the prompt.
+  ( cd "$EPISODE" && $AGENT_CMD "$1" --add-dir "$REMOTION_DIR" --add-dir "$SKILL_DIR" )
 }
 
 # 1. Research, copy, and the episode data file.

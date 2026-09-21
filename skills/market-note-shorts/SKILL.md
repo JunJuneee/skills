@@ -99,7 +99,7 @@ Use 8 main scenes plus a final silent disclaimer. Keep the number of scenes flex
 3. The day's main driver: semiconductors, rates, oil, policy, or another verified catalyst.
 4. Investor flows, breadth, or a second piece of evidence.
 5. Sector or theme contrast.
-6. Movers in the exact same order as narration.
+6. Movers in the exact same order as narration. When a scene lists three or more individual names, narrate the shared theme/cause instead of reading each name and percentage — see script-style.md's "Multi-name decliner/riser cards" rule. This applies to any 3+-name list, not just a dedicated "movers" card: a sector-contrast scene (e.g. multiple KOSPI names shown for temperature-difference) is just as much a roll call if every name gets its own narrated percentage.
 7. Why the move matters and what was not uniform across the market.
 8. Next-session watch points and a concrete closing sentence.
 
@@ -223,6 +223,8 @@ it is retained with the other deliverables.
 - Do not apply a global CSS scale to enlarge the layout; change font sizes and card dimensions directly.
 - Do not add a separate dark or off-brand disclaimer screen.
 - Do not finish on an empty silent tail. Use the final 2 seconds for the static disclaimer.
+- Never narrate a roll call of three or more individual names with their percentages, in any scene type. Say the shared theme instead; the card still shows every name and figure visually.
+- Narrate index/stock/FX/flow moves qualitatively (보합, 소폭, 급등 등), not as a percentage or exact figure — see script-style.md's "Narrate the move qualitatively" table. The card always shows the exact number. Exception: a discrete event's own headline number (a Fed hike's exact size, a CPI print, a jobs number) stays numeric — that figure is the news itself, not a price move to soften.
 - When Instagram Reels or YouTube Shorts is requested, preserve the standard render and create a separate social-safe render and cover.
 - Report the actual rendered duration to the user.
 - Deliver links from the dated `ai_video` archive path, not from the temporary Remotion output directory.
