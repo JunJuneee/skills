@@ -1,8 +1,11 @@
 {
   "$schema": "https://json.schemastore.org/claude-code-marketplace.json",
   "name": "jun-skills",
-  "description": "Jun's personal skill collection (investment / SEO / publishing).",
-  "owner": { "name": "Jun", "url": "https://github.com/JunJuneee" },
+  "description": "Jun's shared skill collection (agent workflow / investment / SEO / publishing).",
+  "owner": {
+    "name": "Jun",
+    "url": "https://github.com/JunJuneee"
+  },
   "plugins": [
     {
       "name": "jun-skills",

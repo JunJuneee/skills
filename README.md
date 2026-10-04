@@ -1,6 +1,22 @@
-# Investment Skills for Claude Code
+# Jun Skills
 
-한국 주식 포트폴리오 자동 분석 시스템. Claude Code Skill + Python 자동화 + 메모리 기반 의사결정.
+Claude·Codex에서 함께 사용하는 스킬 모음. AI 작업 운영, 투자 분석, SEO·발행, 영상 제작을 지원합니다.
+
+## 공용 AI 작업 규약
+
+[`agent-workflow`](skills/agent-workflow/SKILL.md)는 대화에서 승인한 목표를 작업 카드 → 격리 구현 → 독립 리뷰·완료 증거 → 결과물 전달로 연결합니다. 기존 Linear 상태·자동 실행 규칙을 읽어 유지하며 사용자 결정만 모읍니다. PR 작성·병합·배포의 승인 범위를 구분합니다.
+
+Claude·Codex 공용 본문은 `skills/agent-workflow/SKILL.md` 한곳에서 관리합니다. 기존 플러그인의 `skills/` 배포에 포함되며 설치된 클라이언트가 새 버전을 로드한 뒤 사용할 수 있습니다. 이 저장소에 커밋했다고 현재 실행 중인 세션이 갱신된 것으로 보지는 않습니다.
+
+호출할 때 `agent-workflow` 스킬 이름과 승인된 목표를 함께 적습니다. 예:
+
+> agent-workflow를 사용해서 이 프로젝트의 승인된 목표를 카드로 나누고, 기존 runner 규칙을 유지하며 작업물과 완료 증거까지 만들어줘. 새 완료·전달 게이트는 observe로 시작해줘.
+
+> agent-workflow를 사용해서 PR #12·#13을 검토하고 충돌 해결·검증 후 병합해줘. 다른 PR과 배포는 제외해줘.
+
+상세 규약은 [Linear·runner](skills/agent-workflow/references/linear-and-runner.md), [완료 증거](skills/agent-workflow/references/completion-evidence.md), [결과물·미리보기](skills/agent-workflow/references/delivery-and-preview.md), [검토·병합](skills/agent-workflow/references/review-and-merge.md)에 나뉩니다. 프로젝트별 경로·라벨·명령은 [작업 계약 템플릿](skills/agent-workflow/assets/work-contract.md)에 확인해 채우며, [에이전트 작업 지시](skills/agent-workflow/assets/agent-brief.md)로 같은 규약을 하위 작업에 전달합니다.
+
+이 스킬은 규약입니다. 백그라운드 runner 설치·기동, API 키 공유, 운영 모드 변경을 자동으로 수행하는 도구는 아닙니다. 실제 자동 실행은 각 프로젝트의 기존 실행기에 연결합니다.
 
 ## 🎯 핵심 기능
 

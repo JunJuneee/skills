@@ -1,0 +1,4 @@
+interface:
+  display_name: "Agent Workflow"
+  short_description: "승인된 목표를 작업 카드·완료 증거·결과물 전달로 연결하는 공용 규약"
+  default_prompt: "Use $agent-workflow to turn our approved goal into executable tasks, verified evidence, and delivered results while preserving the project's current runner rules."
