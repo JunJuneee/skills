@@ -1,0 +1,4 @@
+interface:
+  display_name: "유튜브 요약"
+  short_description: "유튜브 링크를 자막 기반 계층형 요약 노트로 저장"
+  default_prompt: "Use $yt-summary to summarize this YouTube video into ~/notes/youtube."
