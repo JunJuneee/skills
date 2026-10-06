@@ -4,6 +4,10 @@
 usage:
   python3 fetch_transcript.py URL [--notes-dir ~/notes/youtube] [--bucket 60]
                                   [--cookies-from-browser chrome]
+                                  [--whisper] [--whisper-model REPO]
+
+자막이 없으면 mlx_whisper로 오디오를 받아쓴다(설치돼 있을 때만).
+--whisper는 자막이 있어도 받아쓰기를 강제한다(자동자막 품질이 나쁠 때).
 
 stdout에 JSON 한 개를 출력한다. 요약은 하지 않는다(요약은 에이전트 몫).
 
@@ -11,7 +15,8 @@ exit codes:
   0 성공
   2 입력 오류(URL 아님, yt-dlp 미설치)
   3 yt-dlp 실패(네트워크·봇 차단·비공개 영상)
-  4 쓸 수 있는 자막 없음
+  4 자막 없음 + 받아쓰기 불가(mlx_whisper 미설치)
+  5 받아쓰기 실패
 """
 import argparse
 import html
@@ -30,6 +35,8 @@ YT_URL = re.compile(r"^https?://(www\.|m\.|music\.)?(youtube\.com|youtu\.be)/", 
 TS = re.compile(r"^(\d+):(\d+):(\d+)\.\d+ -->")
 TAG = re.compile(r"<[^>]+>")
 FALLBACK_LANGS = ["ko", "en"]
+WHISPER_MODEL = "mlx-community/whisper-large-v3-turbo"
+WHISPER_INSTALL = "uv tool install --python 3.12 mlx-whisper"
 
 
 def fail(code, msg, **extra):
@@ -76,8 +83,9 @@ def pick_track(meta):
     return None, None
 
 
-def clean_vtt(path, bucket):
-    start, seen, groups = 0, set(), {}
+def vtt_lines(path):
+    """VTT → [(start_sec, text)]. 자동자막 노이즈를 지운다."""
+    start, seen, out = 0, set(), []
     for line in open(path, encoding="utf-8"):
         line = line.rstrip("\n")
         m = TS.match(line)
@@ -92,13 +100,56 @@ def clean_vtt(path, bucket):
         # 자동자막은 같은 줄이 롤링되며 2~3번 반복된다
         if text and text not in seen:
             seen.add(text)
-            groups.setdefault(start // bucket * bucket, []).append(text)
+            out.append((start, text))
+    return out
+
+
+def whisper_lines(path):
+    """mlx_whisper JSON → [(start_sec, text)]. 연속 반복(환각 루프)은 하나만 남긴다."""
+    data = json.loads(Path(path).read_text(encoding="utf-8"))
+    out, prev = [], None
+    for seg in data.get("segments", []):
+        text = seg.get("text", "").strip()
+        if text and text != prev:
+            out.append((int(seg["start"]), text))
+        prev = text
+    return out, data.get("language")
+
+
+def to_buckets(lines, bucket):
+    groups = {}
+    for t, text in lines:
+        groups.setdefault(t // bucket * bucket, []).append(text)
     out = []
     for t in sorted(groups):
         h, rest = divmod(t, 3600)
         stamp = f"{h}:{rest // 60:02d}:{rest % 60:02d}" if h else f"{rest // 60:02d}:{rest % 60:02d}"
         out.append(f"[{stamp}] " + " ".join(groups[t]))
     return "\n".join(out) + "\n"
+
+
+def transcribe(url, work, vid, lang, model, cookies):
+    """오디오만 받아 mlx_whisper로 받아쓴다. 오디오 파일은 끝나면 지운다."""
+    run_ytdlp(["-f", "bestaudio/best", "-o", str(work / f"{vid}.audio.%(ext)s"), url],
+              cookies, attempts=2)
+    audio = next(work.glob(f"{vid}.audio.*"), None)
+    if not audio:
+        fail(5, "오디오 파일이 생성되지 않았다", video_id=vid)
+
+    cmd = ["mlx_whisper", str(audio), "--model", model,
+           "--output-format", "json", "--output-dir", str(work), "--output-name", "whisper",
+           "--verbose", "False",
+           # 이전 문장을 조건으로 쓰면 같은 문장을 무한 반복하는 환각이 잦다
+           "--condition-on-previous-text", "False"]
+    if lang:
+        cmd += ["--language", lang]
+    proc = subprocess.run(cmd, capture_output=True, text=True)
+    audio.unlink(missing_ok=True)
+    out = work / "whisper.json"
+    if proc.returncode != 0 or not out.exists():
+        tail = (proc.stderr or proc.stdout).strip().splitlines()[-3:]
+        fail(5, "받아쓰기 실패: " + " / ".join(tail)[:300], video_id=vid)
+    return out
 
 
 def slugify(title, limit=50):
@@ -132,6 +183,8 @@ def main():
     ap.add_argument("--notes-dir", default="~/notes/youtube")
     ap.add_argument("--bucket", type=int, default=60, help="타임스탬프 단락 간격(초)")
     ap.add_argument("--cookies-from-browser", default=None)
+    ap.add_argument("--whisper", action="store_true", help="자막이 있어도 받아쓰기")
+    ap.add_argument("--whisper-model", default=WHISPER_MODEL)
     a = ap.parse_args()
 
     if not YT_URL.match(a.url):
@@ -141,22 +194,32 @@ def main():
 
     meta = json.loads(run_ytdlp(["-J", a.url], a.cookies_from_browser))
     vid = meta["id"]
-    kind, track = pick_track(meta)
-    if not track:
-        fail(4, "쓸 수 있는 자막이 없다(사람 자막·자동자막 모두 없음)", video_id=vid,
-             title=meta.get("title"))
-
     work = Path(tempfile.gettempdir()) / "yt-summary" / vid
     work.mkdir(parents=True, exist_ok=True)
-    flag = "--write-subs" if kind == "manual" else "--write-auto-subs"
-    run_ytdlp(["--skip-download", flag, "--sub-langs", track, "--sub-format", "vtt",
-               "-o", str(work / "%(id)s"), a.url], a.cookies_from_browser,
-              attempts=2)  # 자막 URL이 간헐적으로 404를 낸다(실측)
-    vtt = work / f"{vid}.{track}.vtt"
-    if not vtt.exists():
-        fail(4, f"자막 파일이 생성되지 않았다({track})", video_id=vid)
 
-    transcript = clean_vtt(vtt, a.bucket)
+    kind, track = (None, None) if a.whisper else pick_track(meta)
+    if track:
+        flag = "--write-subs" if kind == "manual" else "--write-auto-subs"
+        run_ytdlp(["--skip-download", flag, "--sub-langs", track, "--sub-format", "vtt",
+                   "-o", str(work / "%(id)s"), a.url], a.cookies_from_browser,
+                  attempts=2)  # 자막 URL이 간헐적으로 404를 낸다(실측)
+        vtt = work / f"{vid}.{track}.vtt"
+        if not vtt.exists():
+            fail(4, f"자막 파일이 생성되지 않았다({track})", video_id=vid)
+        lines = vtt_lines(vtt)
+    else:
+        if not shutil.which("mlx_whisper"):
+            fail(4, "받아쓰기 도구(mlx_whisper)가 없다", video_id=vid,
+                 title=meta.get("title"), hint=WHISPER_INSTALL)
+        lang = (meta.get("language") or "").split("-")[0] or None
+        t0 = time.time()
+        lines, detected = whisper_lines(
+            transcribe(a.url, work, vid, lang, a.whisper_model, a.cookies_from_browser))
+        kind = "whisper"
+        track = f"{detected or lang or '?'}/{a.whisper_model.split('/')[-1]}"
+        print(f"받아쓰기 {time.time() - t0:.0f}초", file=sys.stderr)
+
+    transcript = to_buckets(lines, a.bucket)
     tpath = work / "transcript.txt"
     tpath.write_text(transcript, encoding="utf-8")
 

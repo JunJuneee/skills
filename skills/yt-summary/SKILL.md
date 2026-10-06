@@ -1,11 +1,11 @@
 ---
 name: yt-summary
-description: YouTube 링크 하나를 자막 기반으로 요약해 ~/notes/youtube에 마크다운 노트로 저장한다. 질문형 도입 + 1./1.1./1. **소주제** 계층 양식으로 쓴다. "/yt-summary <url>", "이 유튜브 요약해줘", "영상 정리해줘", youtube.com·youtu.be 링크와 함께 요약·정리를 요청할 때 사용.
+description: YouTube 링크 하나를 자막(없으면 mlx-whisper 받아쓰기) 기반으로 요약해 ~/notes/youtube에 마크다운 노트로 저장한다. 질문형 도입 + 1./1.1./1. **소주제** 계층 양식으로 쓴다. "/yt-summary <url>", "이 유튜브 요약해줘", "영상 정리해줘", youtube.com·youtu.be 링크와 함께 요약·정리를 요청할 때 사용.
 ---
 
 # YouTube Summary
 
-`SKILL.md`가 있는 디렉터리를 `SKILL_DIR`로 쓴다. 영상 파일은 받지 않고 자막만 받는다.
+`SKILL.md`가 있는 디렉터리를 `SKILL_DIR`로 쓴다. 영상 파일은 받지 않는다. 자막을 받고, 자막이 없을 때만 오디오를 받아 받아쓴다(오디오는 끝나면 지운다).
 
 ## 1. 자막 가져오기
 
@@ -16,6 +16,14 @@ python3 "$SKILL_DIR/scripts/fetch_transcript.py" '<URL>'
 
 URL은 따옴표로 감싼다(`&list=` 같은 쿼리가 셸에서 깨진다). 플레이리스트 링크여도 그 영상 하나만 처리한다.
 
+### 받아쓰기(mlx-whisper)
+
+- 자막이 하나도 없으면 스크립트가 알아서 `mlx_whisper`(`whisper-large-v3-turbo`)로 받아쓴다. 따로 지시할 필요 없다.
+- 자동자막이 너무 깨져 요약이 어려우면 `--whisper`를 붙여 다시 실행해 받아쓰기로 대체한다. 사용자가 "받아쓰기로"라고 하면 처음부터 붙인다.
+- 속도: 40분 한국어 영상 46초(M 시리즈, 2026-10 실측). 모델이 없으면 첫 실행에 약 1.6GB를 받는다.
+- 명령을 실행할 때 타임아웃을 넉넉히(10분) 잡는다.
+- 받아쓰기도 고유명사를 소리 나는 대로 적는다("삼성즈 SKNS", "딸러니더스"). 자동자막과 같은 방식으로 교정한다.
+
 stdout JSON에서 쓰는 값:
 
 | 키 | 용도 |
@@ -24,7 +32,7 @@ stdout JSON에서 쓰는 값:
 | `transcript_chars` | 분량 판단 |
 | `note_path` | 저장할 경로(`~/notes/youtube/<업로드일>_<제목>.md`) |
 | `existing_note` | 같은 `video_id` 노트가 이미 있으면 그 경로 |
-| `caption_kind` / `caption_track` | `manual`(사람 자막) 또는 `auto`(자동자막) / 언어 |
+| `caption_kind` / `caption_track` | `manual`(사람 자막)·`auto`(자동자막)·`whisper`(받아쓰기) / 언어(받아쓰기면 `언어/모델`) |
 | 나머지 | frontmatter에 그대로 옮긴다 |
 
 `existing_note`가 있으면 요약하지 말고 그 경로를 알려준 뒤 다시 만들지 묻는다. 사용자가 "다시"라고 했으면 그 파일을 덮어쓴다.
@@ -35,7 +43,8 @@ stdout JSON에서 쓰는 값:
 |---|---|---|
 | 2 | URL이 아님 / yt-dlp 없음 | 메시지 그대로 전달 |
 | 3 | yt-dlp 실패 | `hint`가 봇 차단이면 `--cookies-from-browser chrome`을 붙여 한 번 재시도. 비공개·삭제 영상이면 중단 |
-| 4 | 자막 없음 | 중단하고 알린다. 받아쓰기(`mlx-whisper`) 설치는 사용자가 원할 때만 안내한다 — 스크립트에는 없다 |
+| 4 | 받아쓰기가 필요한데 `mlx_whisper`가 없음 | 중단하고 `hint`의 설치 명령(`uv tool install --python 3.12 mlx-whisper`)을 알린다. 사용자가 원하면 설치 후 재실행 |
+| 5 | 받아쓰기 실패 | `error`의 마지막 줄을 전달하고 중단 |
 
 yt-dlp의 "No supported JavaScript runtime" 경고는 자막 수집에 영향이 없었다(2026-10 실측). 추출이 깨지기 시작하면 `brew install deno`를 권한다.
 
@@ -56,7 +65,7 @@ yt-dlp의 "No supported JavaScript runtime" 경고는 자막 수집에 영향이
 3. 사용자에게 아래만 알린다:
    - 저장 경로
    - 도입 문단(그대로)과 대주제 제목 목록
-   - 자동자막이면 그 사실과 교정한 고유명사 수
+   - 자동자막·받아쓰기면 그 사실과 교정한 고유명사 수
 
 본문 전체를 채팅에 붙이지 않는다. 사용자가 "보여줘"라고 하면 그때 붙인다.
 
