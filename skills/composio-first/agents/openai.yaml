@@ -1,0 +1,4 @@
+interface:
+  display_name: "Composio First"
+  short_description: "연결된 외부 서비스는 Composio부터 확인하고 올바른 계정으로 실행"
+  default_prompt: "Use $composio-first for connected external services. Prefer the local Composio CLI in terminal sessions, verify the required identity and permissions, and reconcile uncertain writes before any retry."

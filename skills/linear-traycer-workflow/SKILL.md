@@ -23,7 +23,7 @@ description: Traycer에서 지정한 Linear 이슈를 구현 모델의 반대 �
 
 환경변수·토큰이 필요하면 [Doppler 우선 조회](references/secrets-and-environment.md)를 읽고 **Doppler `jay/shared`를 먼저 확인**한다. 제이지의 `SLACK_BOT_TOKEN`·`SLACK_APP_TOKEN`도 이 경로를 우선한다. 로컬 `.env`가 비었다고 미설정으로 단정하지 않으며 값은 출력·복사하지 않고 필요한 프로세스에만 주입한다. 기존 작업 전용 capability를 받은 child는 서비스 토큰을 직접 가져오지 않는다.
 
-Linear 접근은 환경의 지정 연결을 사용한다. 터미널에서 Composio를 쓴다면 로컬 CLI를 우선하며 알 수 없는 도구는 검색·스키마 확인 후 사용한다. 비밀·토큰을 작업 계약이나 공용 스킬에 복사하지 않는다.
+Linear·GitHub·Slack 등 외부 서비스 접근은 [Composio 우선 규칙](../composio-first/SKILL.md)을 따른다. 지정 계정·권한·기능을 충족하는 Composio 연결을 먼저 사용하고 터미널에서는 로컬 CLI를 우선한다. 제이지 봇·작업 capability처럼 지정된 신원과 전용 경로가 있는 작업은 그 계약을 유지한다. 비밀·토큰을 작업 계약이나 공용 스킬에 복사하지 않는다.
 
 ## 2. Traycer 역할과 모델을 배정한다
 
