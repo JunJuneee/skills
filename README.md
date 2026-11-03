@@ -18,6 +18,12 @@ Claude·Codex 공용 본문은 `skills/agent-workflow/SKILL.md` 한곳에서 관
 
 이 스킬은 규약입니다. 백그라운드 runner 설치·기동, API 키 공유, 운영 모드 변경을 자동으로 수행하는 도구는 아닙니다. 실제 자동 실행은 각 프로젝트의 기존 실행기에 연결합니다.
 
+## 외부 서비스는 Composio 우선
+
+[`composio-first`](skills/composio-first/SKILL.md)는 연결된 외부 서비스의 조회·갱신에서 Composio를 먼저 확인하고 사용하게 합니다. Codex·Claude Code의 터미널에서는 로컬 CLI를 우선하며 계정·워크스페이스·대상 권한을 확인합니다. 제이지 봇 등 지정된 신원과 전용 실행 경로는 유지하고, Composio가 필요한 기능·권한을 제공하지 못하면 이유를 밝히고 승인된 다른 경로를 사용합니다. 결과가 불명확한 쓰기는 다른 경로로 재전송하지 않고 먼저 실제 상태를 확인합니다.
+
+> composio-first를 적용해서 연결된 외부 서비스는 Composio부터 확인하고 작업해줘.
+
 ## Linear 이슈의 Traycer 실행
 
 [`linear-traycer-workflow`](skills/linear-traycer-workflow/SKILL.md)는 Linear 이슈를 Traycer에서 실행할 때 쓰는 구체적인 작업 흐름입니다. 구현 모델의 반대 계열 5명이 계획 critique합니다(Codex 구현 → Claude, Claude 구현 → Codex). 조율자가 필요한 내용을 반영하고 지정한 구현 계열의 작업자들이 구현·TC·테스트를 맡으며, 조율자 한 명이 PR 게시와 외부 갱신을 담당합니다. 별도 Opus가 코드 리뷰하고 그 결과를 조율자가 PR에 남기며 수정·검증·재리뷰를 반복합니다. 실제 진행에 따라 Linear 상태를 갱신하고, 병합·배포는 현재 승인 범위를 따릅니다. 계획 후 재승인 단계는 없습니다. 제이지 봇으로 프로젝트 채널에 시작 설명·Linear 링크를 남기고 같은 스레드에 진행과 완료 PR·요청자 멘션을 이어갑니다. 최종 수정·리뷰와 원격 보존을 확인한 뒤 작업 소유 worktree를 정리합니다. 환경변수와 제이지 토큰은 Doppler `jay/shared`에서 우선 찾고 필요한 프로세스에만 주입합니다.
