@@ -32,6 +32,8 @@ Claude·Codex 공용 본문은 `skills/agent-workflow/SKILL.md` 한곳에서 관
 
 이 스킬은 기존 `agent-workflow`를 대체하거나 감시 실행기를 설치하지 않습니다. 역할별 모델·하위 위임은 [모델 계약](skills/linear-traycer-workflow/references/models-and-delegation.md), TC·PR 댓글·Linear 상태 전환은 [검증과 진행 기록](skills/linear-traycer-workflow/references/evidence-and-linear.md)을 따릅니다.
 
+같은 작업의 후속 PR 리뷰에도 기존 수정·검증·재리뷰 계약을 이어받습니다. 유효한 지적이 오면 실제 수정 작업으로 연결하며, 비동기 응답을 기다리는 턴 종료와 사용자 결정 대기를 구분합니다. PR-only와 병합 승인, 명시적 리뷰 전용·사용자 hold는 각각 유지합니다. 상세 기준은 [리뷰 반복과 재개](skills/linear-traycer-workflow/references/review-loop.md)를 따릅니다.
+
 ## 🎯 핵심 기능
 
 | 기능 | 트리거 | 결과 |
