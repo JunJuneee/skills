@@ -42,7 +42,16 @@ and a word-like look is no exception by itself; dev:redact_path_rules):
 - A source id inside a src comment ("<!-- src: <kind>:<id> @date -->", kind one of
   mem handoff design prompts inbox manual notes) is a file path by
   construction (ids are built from file names and folder names) and is
-  exempt.
+  exempt, but only when the caller passes it in known_ids (fix round 1:
+  verify passes the batch's SourceIndex ids, scan_tree and prepare the
+  sources.json ids). An unknown id in a src-shaped comment is plain text,
+  so a comment cannot launder a token into a page, draft or frontmatter.
+- Before any path exemption, the short parts of a candidate are checked
+  together (_short_parts_kind, fix round 1): hex parts with a digit joined
+  by the hex rule, and what is left once words of five or more letters,
+  digit runs and one worktree-suffix hex part per segment are cut out by
+  the entropy rule. Dashed or slashed short chunks no longer pass as a
+  path.
 - Any path or source id segment with a part (split on -_.) that is itself
   a 24+ char high-entropy token is still redacted.
 - A word-shaped part is lower, UPPER, Capitalized, digits, or case humps
@@ -231,8 +240,68 @@ def _token_anchored(text, start):
 
 
 def _src_spans(text):
-    """(start, end) of every source id cited in a src comment of text."""
-    return [match.span(1) for match in _SRC_COMMENT_RE.finditer(text)]
+    """(start, end, id) of every source id cited in a src comment of text."""
+    return [match.span(1) + (match.group(1),) for match in _SRC_COMMENT_RE.finditer(text)]
+
+
+_SLUG_KEEP_RE = re.compile(r"([-_.]+)")
+_SEP_RUN_RE = re.compile(r"[-_.]{2,}")
+_SUFFIX_HEX_RE = re.compile(r"^(?:[0-9a-f]{6,16}|[0-9A-F]{6,16})$")
+_EMBEDDED_ID_RE = re.compile(
+    r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
+    r"|[0-9a-f]{40}|[0-9A-F]{40})(?![0-9A-Fa-f])")
+
+
+def _short_parts_kind(value):
+    """Kind ("hex" or "entropy") when the short parts of value carry a
+    secret together, else None (fix round 1). Runs on every candidate
+    before any path or source-id exemption.
+
+    - Per segment, the last 6-16 digit hex part with a digit is the
+      worktree-suffix (or short SHA) shape. All hex parts with a digit
+      joined are checked by the hex rule (32+ digits, entropy >= 3.0), so
+      /a/<16 hex>/<16 hex> and <16 hex>-<16 hex> are caught.
+    - The candidate with its words of five or more letters, its digit runs
+      and those suffixes cut out (separators kept) is checked by the
+      entropy rule (24+ chars, entropy >= 4.0; the whole candidate must
+      reach 4.0 too, so cutting words out never makes a hit). Dashed short chunks
+      (Kq7Z-p2Wm-..., ab-cd-ef-..., /srv/Kq7Z/p2Wm/...) are caught;
+      natural names keep their long words out of it.
+    UUIDs and 40-char SHAs (contract-4 exceptions) are cut out first."""
+    hex_parts = []
+    weak = []
+    for segment in value.split("/"):
+        segment = _EMBEDDED_ID_RE.sub("-", segment)
+        pieces = _SLUG_KEEP_RE.split(segment)
+        suffix = None
+        for index in range(len(pieces) - 1, -1, -1):
+            if _SUFFIX_HEX_RE.match(pieces[index]) and re.search(r"[0-9]", pieces[index]):
+                suffix = index
+                break
+        out = []
+        for index, piece in enumerate(pieces):
+            if not piece or _SLUG_SPLIT_RE.match(piece):
+                out.append(piece)
+                continue
+            is_hex = bool(_HEX_RE.match(piece) and re.search(r"[0-9]", piece)
+                          and not piece.isdigit())
+            if is_hex:
+                hex_parts.append(piece)
+            if index == suffix or piece.isdigit() or (len(piece) >= 5 and _word_part(piece)
+                                                     and not is_hex):
+                out.append("")
+            else:
+                out.append(piece)
+        weak.append(_SEP_RUN_RE.sub(lambda m: m.group(0)[0], "".join(out)).strip("-_."))
+    joined_hex = "".join(hex_parts)
+    if (len(joined_hex) >= HEX_MIN_LEN and _HEX_RE.match(joined_hex)
+            and shannon_entropy(joined_hex) >= HEX_ENTROPY_THRESHOLD):
+        return "hex"
+    joined = "/".join(part for part in weak if part)
+    if (len(joined) >= ENTROPY_MIN_LEN and shannon_entropy(joined) >= ENTROPY_THRESHOLD
+            and shannon_entropy(value) >= ENTROPY_THRESHOLD):
+        return "entropy"
+    return None
 
 
 def _is_path(value, anchored=False):
@@ -268,7 +337,13 @@ def _candidate_kind(value, allow_paths=True, anchored=False, source_id=False):
         return "hex" if shannon_entropy(value.replace("-", "")) >= HEX_ENTROPY_THRESHOLD else None
     if allow_paths and source_id and not any(
             _segment_is_secret(segment) for segment in value.split("/") if segment):
+        # Only reached for an id the caller checked (redact known_ids): it
+        # was built from real file and folder names (a macOS temp folder
+        # holds random short parts), so only a 24+ char token part counts.
         return None
+    short_kind = _short_parts_kind(value)
+    if short_kind is not None:
+        return short_kind
     if allow_paths and _is_path(value, anchored):
         return None
     if len(value) >= HEX_MIN_LEN and _HEX_RE.match(value):
@@ -291,8 +366,14 @@ def _placeholder(value):
     return stripped.lower() in ("xxxxxx", "changeme", "example", "redacted", "none", "null")
 
 
-def redact(text, allow=()):
-    """Return RedactResult(text, counts, warnings) for one source text."""
+def redact(text, allow=(), known_ids=None):
+    """Return RedactResult(text, counts, warnings) for one source text.
+
+    known_ids: source ids a caller has checked (sources.json, this batch).
+    Only an id in a src comment that is one of them gets the source-id
+    exemption (fix round 1); without known_ids no src-shaped span is
+    exempt, so a src comment cannot launder a token."""
+    known = frozenset(known_ids or ())
     allow_set = set(item for item in (allow or ()) if isinstance(item, str) and item)
     long_allow = sorted((item for item in allow_set if len(item) >= ALLOW_MIN_SUBSTRING),
                         key=len, reverse=True)
@@ -347,7 +428,8 @@ def redact(text, allow=()):
             return value
         anchored = _token_anchored(match.string, match.start())
         start = match.start()
-        in_src = any(low <= start and match.end() <= high for low, high in src_spans)
+        in_src = any(low <= start and match.end() <= high and cited in known
+                     for low, high, cited in src_spans)
         kind = _candidate_kind(value, anchored=anchored, source_id=in_src)
         if kind is None:
             return value
@@ -370,7 +452,7 @@ def redact(text, allow=()):
                 return False
         return True
 
-    src_spans = _src_spans(text)
+    src_spans = _src_spans(text) if known else []
     text = _CANDIDATE_RE.sub(entropy_repl, text)
 
     warnings = collections.Counter()
@@ -383,6 +465,6 @@ def redact(text, allow=()):
     return RedactResult(text, dict(counts), dict(warnings))
 
 
-def scan(text, allow=()):
+def scan(text, allow=(), known_ids=None):
     """Secret kinds still present in text ({} when clean). Used by verify."""
-    return redact(text, allow).counts
+    return redact(text, allow, known_ids).counts

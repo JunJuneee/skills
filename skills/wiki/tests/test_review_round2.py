@@ -78,8 +78,10 @@ class RedactExceptionsTest(unittest.TestCase):
             "see ./.config/some-tool-4c2e9a1b7d3f/settings",
             '"~/.claude/projects/foo/bar-0123456789ab"',
         ]
+        known = ["mem:%s/sample-review-board.md" % folder,
+                 "handoff:2026-11-05_sample-tools-workflow-v2-0123456789ab.md"]
         for text in texts:
-            self.assertEqual(redact.scan(text), {}, text)
+            self.assertEqual(redact.scan(text, known_ids=known), {}, text)
 
     def test_bare_natural_slugs_need_redact_allow(self):
         # Review round 3: contract 4 has no slug exception. A bare natural

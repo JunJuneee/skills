@@ -55,6 +55,9 @@ class RedactRound3Test(unittest.TestCase):
 
     def test_real_paths_and_src_ids_stay(self):
         folder = "-Users-someone-Desktop-side-tools"
+        # Fix round 1: src ids are exempt only when the caller knows them.
+        known = ["mem:%s/feedback_x.md" % folder,
+                 "handoff:2026-11-05_sample-tools-workflow-v2-0123456789ab.md"]
         for text in ("~/.claude/projects/%s/memory/feedback_x.md" % folder,
                      "<!-- src: mem:%s/feedback_x.md @2026-11-01 -->" % folder,
                      "<!-- src: handoff:2026-11-05_sample-tools-workflow-v2-0123456789ab.md"
@@ -62,10 +65,11 @@ class RedactRound3Test(unittest.TestCase):
                      "Sources/AppFeature/UserProfileSettingsPanel.swift",
                      "<!-- src:mem:%s/feedback_x.md @2026-11-01 -->" % folder,
                      "/srv/someone/.traycer/worktrees/acme__tools/tools-quiet-otter-0123456789ab"):
-            self.assertEqual(redact.scan(text), {}, text)
+            self.assertEqual(redact.scan(text, known_ids=known), {}, text)
         # A src id is no hiding place for a long secret part.
         token = j("Zx9Qw3Er", "7Ty1Ui5O", "p2As8Df4", "Gh6Jk0Lm")
-        self.assertTrue(redact.scan("<!-- src: mem:-Users-x/%s.md @2026-11-01 -->" % token))
+        cited = "mem:-Users-x/%s.md" % token
+        self.assertTrue(redact.scan("<!-- src: %s @2026-11-01 -->" % cited, known_ids=[cited]))
         # Outside a src comment an encoded folder is just a token.
         self.assertEqual(redact.scan(j("mem:-Users-", "Kx9mQp4ZsW8nBc6Lf3YhRt2m/x.md")),
                          {"entropy": 1})
@@ -270,7 +274,7 @@ class MinorsRound3Test(ta.AbsorbCase):
 
     def test_foreign_user_rules_stop_personal_batches_only(self):
         rules_dir = os.path.join(self.home, ".claude", "rules")
-        ta.write(os.path.join(rules_dir, "wiki-prefs.md"), "- 답변은 짧게\n")
+        ta.write(os.path.join(rules_dir, "wiki-prefs.md"), verify.rules_text(["- 답변은 짧게"]))
         self.assertEqual(absorb.foreign_user_rules(self.env), 0)
         ta.write(os.path.join(rules_dir, "team", "workflow.md"), "- 팀 규칙\n")
         self.assertEqual(absorb.foreign_user_rules(self.env), 1)

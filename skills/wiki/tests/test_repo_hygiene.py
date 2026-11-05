@@ -22,10 +22,26 @@ def skill_files():
                 yield os.path.join(dirpath, name)
 
 
+def public_files():
+    """skills/wiki plus the repo files this skill ships with (the plugin
+    hooks and the README): the hygiene scans cover all of them (fix round
+    1: a real file name once slipped into a fixture)."""
+    for path in skill_files():
+        yield path
+    hooks = os.path.join(_helpers.REPO_ROOT, "hooks")
+    if os.path.isdir(hooks):
+        for name in sorted(os.listdir(hooks)):
+            if name.endswith(TEXT_EXTENSIONS):
+                yield os.path.join(hooks, name)
+    readme = os.path.join(_helpers.REPO_ROOT, "README.md")
+    if os.path.isfile(readme):
+        yield readme
+
+
 class HygieneTest(unittest.TestCase):
     def test_no_real_home_paths(self):
         needles = ["/" + "Users" + "/", "/" + "home" + "/" + os.environ.get("USER", "nobody") + "/"]
-        for path in skill_files():
+        for path in public_files():
             with open(path, encoding="utf-8") as handle:
                 text = handle.read()
             for needle in needles:
@@ -45,7 +61,7 @@ class HygieneTest(unittest.TestCase):
         if terms_file and os.path.isfile(terms_file):
             with open(terms_file, encoding="utf-8") as handle:
                 terms = [line.strip().lower() for line in handle if line.strip()]
-        for path in skill_files():
+        for path in public_files():
             with open(path, encoding="utf-8") as handle:
                 text = handle.read()
             self.assertIsNone(encoded.search(text), path)

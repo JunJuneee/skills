@@ -190,8 +190,12 @@ def fold(text):
 
 
 class TermMatcher(object):
-    def __init__(self, terms):
+    """work_terms matcher. Texts are matched with the home folder replaced
+    by '~' first (common.strip_home, fix round 1)."""
+
+    def __init__(self, terms, home=None):
         self.terms = [fold(term) for term in terms or () if fold(term).strip()]
+        self.home = home
 
     def hits(self, *texts):
         if not self.terms:
@@ -199,7 +203,8 @@ class TermMatcher(object):
         for text in texts:
             if not text:
                 continue
-            folded = fold(text if isinstance(text, str) else " ".join(text))
+            text = text if isinstance(text, str) else " ".join(text)
+            folded = fold(common.strip_home(text, self.home))
             for term in self.terms:
                 if term in folded:
                     return True
@@ -456,7 +461,7 @@ class Resolver(object):
         self.owners = dict((key.strip().lower(), value)
                            for key, value in domains.get("owners", {}).items())
         self.overrides = domains.get("overrides", {})
-        self.terms = TermMatcher(domains.get("work_terms", []))
+        self.terms = TermMatcher(domains.get("work_terms", []), home=home)
         self.fs_root = fs_root
         self.remote_fn = remote_fn or (lambda cwd: common.git_remote_urls(cwd, timeout=2.0))
         self.home = home
@@ -1009,7 +1014,7 @@ def restore_generated(root, now, warnings):
             warnings.append("config_dirty:%s" % path)
 
 
-def _dirty_secrets(root, paths, allow):
+def _dirty_secrets(root, paths, allow, known_ids=None):
     """(hits, unscanned) of dirty files. hits: contract-4 hits. unscanned:
     paths that exist but cannot be scanned (symlink, not a regular file,
     not UTF-8, unreadable). Paths that no longer exist (deletions) are
@@ -1029,7 +1034,7 @@ def _dirty_secrets(root, paths, allow):
         except (IOError, OSError, UnicodeDecodeError):
             unscanned.append(path)
             continue
-        if redact.scan(text, allow):
+        if redact.scan(text, allow, known_ids):
             hits.append(path)
     return hits, unscanned
 
@@ -1058,7 +1063,10 @@ def capture_manual_edits(root, sources, now, allow=(), warnings=None):
     dirty = dirty_pages(root)
     if not dirty:
         return []
-    secret, unscanned = _dirty_secrets(root, sorted(set(path for _status, path in dirty)), allow)
+    # Only ids sources.json records get the src-comment exemption (fix
+    # round 1): a human page cites them, an unknown one is just text.
+    secret, unscanned = _dirty_secrets(root, sorted(set(path for _status, path in dirty)), allow,
+                                       set((sources or {}).get("sources") or {}))
     if warnings is not None:
         if secret:
             warnings.append("secret_found_manual:%d" % len(secret))
@@ -1135,6 +1143,7 @@ class Plan(object):
         self.redaction_warnings = collections.Counter()
         self.warnings = []
         self.held_deletions = collections.Counter()
+        self.known_ids = set()  # src ids redact may exempt (fix round 1)
 
     def changed_count(self, status):
         """Items of a status that changed since the last absorb."""
@@ -1160,6 +1169,12 @@ def plan_sources(root, items, scanned_kinds, sources, paths, resolver, domains):
     plan = Plan()
     entries = sources["sources"]
     allow = domains.get("redact_allow", [])
+    # Ids prepare itself made from file and folder names (sources.json and
+    # this run's items): only these keep the src-comment exemption when
+    # source text is redacted; an id-shaped span in a source is redacted
+    # like any other text (fix round 1).
+    plan.known_ids = set(entries) | set(item["id"] for item in items)
+    known = plan.known_ids
     present = set()
     for item in items:
         source_id = item["id"]
@@ -1187,7 +1202,7 @@ def plan_sources(root, items, scanned_kinds, sources, paths, resolver, domains):
             status = STATUS_ACTIVE
         else:
             status = STATUS_UNRESOLVED
-        result = redact.redact(item["text"], allow)
+        result = redact.redact(item["text"], allow, known)
         digest = sha256_text(result.text)
         prior_active = (entry is not None and entry.get("status") in (STATUS_ACTIVE, STATUS_CONSUMED)
                         and entry.get("domain") in common.DOMAINS)
@@ -1211,7 +1226,7 @@ def plan_sources(root, items, scanned_kinds, sources, paths, resolver, domains):
             if item["kind"] == KIND_MANUAL:
                 op = item.get("manual_op") or "changed"
                 old = None
-                diff_text = redact.redact(item.get("manual_diff") or "", allow).text
+                diff_text = redact.redact(item.get("manual_diff") or "", allow, known).text
             else:
                 op = "changed" if prior_active and entry["domain"] == domain else "new"
                 old = read_snapshot(root, entry) if op == "changed" else None
@@ -1365,7 +1380,7 @@ def _context_notes(root, domain, resolver, allow, plan):
             # Counted once, as the notes:<domain>/<page> source (plan_sources).
             plan.warnings.append("my_notes_quarantined:%s" % name)
             continue
-        out.append((name, redact.redact(part, allow).text))
+        out.append((name, redact.redact(part, allow, plan.known_ids).text))
     return out
 
 

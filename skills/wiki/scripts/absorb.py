@@ -122,7 +122,10 @@ def llm_env(environ, claude_path):
     2.1.285: a project CLAUDE.md and a project .claude/rules canary were
     visible without the flags and hidden by the flags alone and by
     CLAUDE_CODE_DISABLE_CLAUDE_MDS alone; the user CLAUDE.md was hidden
-    too; the user rules folder could not be measured, see SKILL.md).
+    too; fix round 1, scripts/isolation_probe.py: the user CLAUDE.md, user
+    rules (nested and symlinked) and auto-memory canaries a plain
+    `claude -p` showed were hidden by the flags alone and by the env
+    alone, see SKILL.md).
     CLAUDE_CONFIG_DIR is passed through only so a non-default login works.
     """
     home = environ.get("HOME") or os.path.expanduser("~")
@@ -143,12 +146,14 @@ def llm_env(environ, claude_path):
 
 def foreign_user_rules(environ, rules_path=None):
     """Number of .md files in the user rules folder the LLM's claude would
-    see (CLAUDE_CONFIG_DIR, else HOME/.claude; llm_env passes both), other
-    than the wiki's own rules file. Whether --setting-sources "" and
-    CLAUDE_CODE_DISABLE_CLAUDE_MDS keep that folder out of the model is not
-    measured (SKILL.md), and any other rules file (an employer's workflow
-    rules, say) could carry work text into a personal batch, so personal
-    batches refuse to run while such files exist (user_rules_unisolated)."""
+    see (CLAUDE_CONFIG_DIR, else HOME/.claude; llm_env passes both),
+    symlinked folders included, other than the wiki's own rules file
+    (_own_rules_file). scripts/isolation_probe.py measured that folder
+    hidden from the model on 2.1.318 by two independent layers; any other
+    rules file (an employer's workflow rules, say) could still carry work
+    text into a personal batch if a later claude loaded it, so personal
+    batches keep refusing to run while such files exist
+    (user_rules_unisolated, belt-and-braces)."""
     config = (environ.get("CLAUDE_CONFIG_DIR") or "").strip()
     if not config:
         home = environ.get("HOME") or os.path.expanduser("~")
@@ -157,18 +162,42 @@ def foreign_user_rules(environ, rules_path=None):
     if not os.path.isdir(base):
         return 0
     count = 0
-    for dirpath, dirnames, filenames in os.walk(base):
+    own = [os.path.join(base, RULES_FILENAME)] + ([rules_path] if rules_path else [])
+    own = set(os.path.realpath(path) for path in own)
+    # followlinks (fix round 1): shared or employer rules are typically a
+    # symlinked folder; visited realpaths stop a symlink loop.
+    visited = set()
+    for dirpath, dirnames, filenames in os.walk(base, followlinks=True):
+        real_dir = os.path.realpath(dirpath)
+        if real_dir in visited:
+            dirnames[:] = []
+            continue
+        visited.add(real_dir)
         dirnames[:] = [d for d in dirnames if not d.startswith(".")]
         for name in filenames:
             if not name.endswith(".md"):
                 continue
             full = os.path.join(dirpath, name)
-            if dirpath == base and name == RULES_FILENAME:
-                continue
-            if rules_path and os.path.realpath(full) == os.path.realpath(rules_path):
+            if os.path.realpath(full) in own and _own_rules_file(full):
                 continue
             count += 1
     return count
+
+
+def _own_rules_file(path):
+    """True only for a regular file (no symlink) whose text has the shape
+    verify.rules_text writes: RULES_HEADER, then '- ' lines only. A file
+    merely named wiki-prefs.md or passed as --rules-path is not trusted by
+    its name (fix round 1)."""
+    if os.path.islink(path) or not os.path.isfile(path):
+        return False
+    try:
+        text = verify.read_text(path)
+    except (IOError, OSError, UnicodeDecodeError):
+        return False
+    if not text.startswith(verify.RULES_HEADER):
+        return False
+    return all(line.startswith("- ") for line in text[len(verify.RULES_HEADER):].splitlines())
 
 
 def probe_claude(claude_path, env, timeout=PROBE_TIMEOUT):
@@ -684,7 +713,9 @@ def run_batch(ctx, batch, record):
         aliased = verify.sync_aliases(wt, domain, groups, terms)
         linked = verify.link_pages(wt, domain, sorted(set(check.pages)), terms)
         verify.assert_notes_unchanged(wt, snapshot)
-        verify.recheck_pages(wt, domain, list(aliased) + list(linked), ctx["domains"])
+        verify.recheck_pages(wt, domain, list(aliased) + list(linked), ctx["domains"],
+                             verify.known_source_ids(working["sources"],
+                                                     list(ctx["run_sources"]) + list(batch["sources"])))
         commit_worktree(wt, "wiki: absorb %s 묶음 %d (%s)" % (ctx["run_id"], batch_id, domain))
         post = verify.head_sha(wt)
         outcome["ok"] = True
@@ -1071,7 +1102,9 @@ def _finish(ctx, report, prep, prep_json, run, previous, rules_path):
             deferred += defer_conflicts(root, wt, base, batches, message)
             if len([b for b in batches if b["deferred"]]) == before:
                 break
-        hits = verify.scan_tree(wt, verify.scan_allow(wt, domains_cfg))
+        hits = verify.scan_tree(wt, verify.scan_allow(wt, domains_cfg),
+                                verify.known_source_ids(ctx["working_sources"]["sources"],
+                                                        ctx["run_sources"]))
         blocking, existing = split_tree_hits(wt, base, hits)
         if existing:
             # Bytes main already holds (committed before a stricter scan):

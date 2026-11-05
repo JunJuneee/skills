@@ -572,7 +572,27 @@ def validate_page_frontmatter(fm):
 # ---------------------------------------------------------------------------
 
 SRC_COMMENT_RE = re.compile(r"<!--\s*src:\s*(\S+)\s+@(\d{4}-\d{2}-\d{2})\s*-->")
-_FENCE_RE = re.compile(r"^ {0,3}(```|~~~)")
+_FENCE_RE = re.compile(r"^ {0,3}(`{3,}|~{3,})(.*)$")
+
+
+def fence_step(fence, line):
+    """Fenced-code tracking for one line (CommonMark rules), shared by every
+    code-aware scan. fence is the open fence's marker ('```', '~~~~', ...)
+    or None. Returns (fence_after, is_fence_line). A closing fence uses the
+    opening character, is at least as long and has nothing after it, so a
+    ``` line inside a ```` block is code (fix round 1); a backtick opener's
+    info string holds no backtick."""
+    match = _FENCE_RE.match(line.rstrip("\r\n"))
+    if not match:
+        return fence, False
+    marker, rest = match.group(1), match.group(2)
+    if fence is None:
+        if marker[0] == "`" and "`" in rest:
+            return None, False
+        return marker, True
+    if marker[0] == fence[0] and len(marker) >= len(fence) and not rest.strip():
+        return None, True
+    return fence, False
 
 
 def format_src(source_id, date):
@@ -593,14 +613,8 @@ def split_my_notes(body, heading=MY_NOTES_HEADING):
     offset = 0
     fence = None
     for line in body.splitlines(True):
-        stripped = line.rstrip("\r\n")
-        match = _FENCE_RE.match(stripped)
-        if match:
-            if fence is None:
-                fence = match.group(1)
-            elif fence == match.group(1):
-                fence = None
-        elif fence is None and stripped.rstrip() == heading:
+        fence, is_fence = fence_step(fence, line)
+        if not is_fence and fence is None and line.rstrip("\r\n").rstrip() == heading:
             return body[:offset], body[offset:]
         offset += len(line)
     return body, ""
@@ -611,11 +625,20 @@ def my_notes_subsection(notes, domain):
 
     Root pages keep one subsection per domain so a batch only ever sees its
     own domain's notes. Text directly under '## 내 메모' is never staged.
+    Headings inside fenced code are code (fix round 1): a '### personal'
+    line in a work code block does not start the personal subsection.
     """
     wanted = "### " + domain
     out = []
     inside = False
+    fence = None
     for line in notes.splitlines(True):
+        before = fence
+        fence, is_fence = fence_step(fence, line)
+        if is_fence or before is not None:
+            if inside:
+                out.append(line)
+            continue
         stripped = line.rstrip("\r\n").rstrip()
         if stripped.startswith("## ") and not stripped.startswith("### "):
             if inside:
@@ -932,6 +955,57 @@ def domain_for_remotes(urls, owners):
     return None
 
 
+_HOME_PATTERNS = {}
+
+
+def home_dir(environ=None):
+    environ = os.environ if environ is None else environ
+    return environ.get("HOME") or os.path.expanduser("~")
+
+
+def _home_patterns(home):
+    """Regexes for the home folder in text: the absolute path (and its
+    realpath) and Claude Code's encoded folder form, where every
+    non-alphanumeric character becomes '-' (a slash or dot of the path
+    turns into '-').
+    Each must end on a name boundary, so a home named acme never matches
+    inside a sibling folder named acmecorp."""
+    if home in _HOME_PATTERNS:
+        return _HOME_PATTERNS[home]
+    patterns = []
+    clean = (home or "").rstrip("/")
+    if len(clean) > 1:
+        spellings = set([clean])
+        try:
+            spellings.add(os.path.realpath(clean).rstrip("/"))
+        except (OSError, ValueError):
+            pass
+        encoded = set(re.sub(r"[^A-Za-z0-9]", "-", item) for item in spellings)
+        for item in sorted(spellings, key=len, reverse=True):
+            patterns.append(re.compile(re.escape(item) + r"(?![A-Za-z0-9_.-])", re.IGNORECASE))
+        for item in sorted(encoded, key=len, reverse=True):
+            patterns.append(re.compile(re.escape(item) + r"(?![A-Za-z0-9_.])", re.IGNORECASE))
+    _HOME_PATTERNS[home] = patterns
+    return patterns
+
+
+def strip_home(text, home=None):
+    """text with the user's home folder replaced by '~' (fix round 1).
+
+    Every work_terms match runs on this, in prepare and verify alike: the
+    home folder's name is the account name, which may be the employer's
+    word, and matching it would send every no-remote memory folder and
+    prompt under home to work, and quarantine any personal text that
+    quotes a home path. The rest of the path still counts."""
+    if not text:
+        return text
+    if home is None:
+        home = home_dir()
+    for pattern in _home_patterns(home):
+        text = pattern.sub("~", text)
+    return text
+
+
 def git_remote_urls(cwd, timeout=1.0):
     """Run `git -C <cwd> remote -v` (the only git call hooks may make).
 
@@ -1080,14 +1154,18 @@ PLAN_DEVIATIONS = (
     "label_default:launchd label user defaults to local, never $USER",
     "absorb_running_marker:.state/absorb-running.json while absorb runs; status shows it",
     "redact_path_rules:contract-4 file-path exception made concrete: path-like segments only, "
-    "src-comment source ids, existing page file names and Claude Code project folders after "
-    "projects/; no bare-slug exemption; redact_allow also matches a containing or contained "
+    "src-comment source ids the caller knows (sources.json, this run), existing page file "
+    "names and Claude Code project folders after projects/; short parts rechecked together "
+    "first; no bare-slug exemption; redact_allow also matches a containing or contained "
     "entry",
     "root_assembly_guard:a draft with an open code fence fails its batch "
     "(draft_unbalanced_fence); a root file that cannot be reassembled safely is left as it is "
     "(root_file_skipped:<name>), never a failed run",
-    "user_rules_guard:personal batches refuse to run while the user rules folder holds .md "
-    "files other than the wiki rules file (user_rules_unisolated)",
+    "user_rules_guard:personal batches refuse to run while the user rules folder (symlinked "
+    "folders followed) holds .md files other than the wiki rules file, recognised by shape "
+    "(user_rules_unisolated); kept after the 2.1.318 measurement as belt-and-braces",
+    "home_terms:work_terms are matched after the home folder (absolute and Claude Code "
+    "encoded form) is replaced by ~",
     "query_domain_conflict:query --domain cannot name the other domain in a decided cwd "
     "(domain_conflict)",
     "schedule_install_guard:schedule install refuses domains.json placeholders "

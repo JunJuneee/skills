@@ -71,7 +71,6 @@ _MDLINK_RE = re.compile(r"\]\(\s*<?([^)\s>]+)>?(?:\s+\"[^\"\n]*\")?\s*\)")
 _PROTECT_RE = re.compile(r"`[^`\n]*`|\[\[[^\]\n]*\]\]|!?\[[^\]\n]*\]\([^)\n]*\)|<!--.*?-->"
                          r"|<[^>\n]+>|[A-Za-z][A-Za-z0-9+.-]*://\S+")
 _HEADING_RE = re.compile(r"^ {0,3}#{1,6}(\s|$)")
-_FENCE_RE = re.compile(r"^ {0,3}(```|~~~)")
 _SECTION_RE = re.compile(r"^## (.+?)\s*$")
 
 
@@ -93,13 +92,18 @@ def fold(text):
 
 
 class Terms(object):
-    """work_terms matcher: NFKC + casefold on both sides (D5, D12)."""
+    """work_terms matcher: NFKC + casefold on both sides (D5, D12), with
+    the home folder replaced by '~' first (common.strip_home, fix round 1;
+    home defaults to $HOME)."""
 
-    def __init__(self, terms):
+    def __init__(self, terms, home=None):
         self.terms = [fold(term) for term in terms or () if fold(term).strip()]
+        self.home = home
 
     def hits(self, text):
-        folded = fold(text)
+        if not self.terms or not text:
+            return False
+        folded = fold(common.strip_home(text, self.home))
         return any(term in folded for term in self.terms)
 
 
@@ -169,12 +173,43 @@ def notes_tail(text):
     return common.split_my_notes(body)[1]
 
 
+# notes_guard prefix of a page whose '## 내 메모' heading is hidden in code.
+HIDDEN_NOTES_MARK = "\x00hidden-notes\x00"
+
+
+def _body_notes_hidden(body):
+    raw = any(line.rstrip() == common.MY_NOTES_HEADING for line in body.splitlines())
+    return raw and not common.split_my_notes(body)[1]
+
+
+def notes_hidden(text):
+    """True when a page has a raw '## 내 메모' line that split_my_notes
+    cannot find: an unclosed (or mismatched) fence above it, e.g. ```
+    pasted in Obsidian, turns the human's notes into 'code'."""
+    _fm, _err, body, _nl = page_split(text)
+    return _body_notes_hidden(body)
+
+
+def notes_guard(text):
+    """What D1 freezes in a page: its '## 내 메모' tail, or, when the
+    heading is hidden by an open fence (notes_hidden), the whole body
+    (fix round 1: the human's text cannot be told apart from the LLM's
+    there, so all of it is human-owned). Compare with same_notes."""
+    _fm, _err, body, _nl = page_split(text)
+    if _body_notes_hidden(body):
+        return HIDDEN_NOTES_MARK + body
+    return common.split_my_notes(body)[1]
+
+
 def same_notes(old_tail, new_tail):
     """'## 내 메모' tails compare byte-for-byte, except that a page without
     the heading equals one that gained only the empty heading (SCHEMA puts
-    it last on every page, so the LLM may add it to a human page)."""
+    it last on every page, so the LLM may add it to a human page). A
+    hidden-notes guard (notes_guard) only equals itself."""
     if old_tail == new_tail:
         return True
+    if old_tail.startswith(HIDDEN_NOTES_MARK) or new_tail.startswith(HIDDEN_NOTES_MARK):
+        return False
     empty = ("", common.MY_NOTES_HEADING)
     return old_tail.strip() in empty and new_tail.strip() in empty and not old_tail.strip()
 
@@ -190,12 +225,7 @@ def fences_balanced(text):
     (same rules as strip_fences and common.split_my_notes)."""
     fence = None
     for line in (text or "").splitlines():
-        match = _FENCE_RE.match(line)
-        if match:
-            if fence is None:
-                fence = match.group(1)
-            elif fence == match.group(1):
-                fence = None
+        fence, _match = common.fence_step(fence, line)
     return fence is None
 
 
@@ -216,12 +246,8 @@ def strip_fences(text):
     out = []
     fence = None
     for line in text.splitlines(True):
-        match = _FENCE_RE.match(line)
+        fence, match = common.fence_step(fence, line)
         if match:
-            if fence is None:
-                fence = match.group(1)
-            elif fence == match.group(1):
-                fence = None
             out.append("\n")
             continue
         out.append("\n" if fence else line)
@@ -375,6 +401,11 @@ class SourceIndex(object):
                 self.domains[source["id"]] = source["domain"]
                 self.withdrawn.discard(source["id"])
 
+    def known_ids(self):
+        """Every id this index knows (withdrawn included): the ids redact
+        may exempt inside src comments (fix round 1)."""
+        return set(self.domains) | self.withdrawn
+
     def domain_of(self, source_id):
         """Known domain of a src id, or None. Callers check withdrawn ids
         first."""
@@ -462,13 +493,8 @@ def section_text(body, heading):
     inside = False
     fence = None
     for line in body.splitlines(True):
-        match = _FENCE_RE.match(line)
-        if match:
-            if fence is None:
-                fence = match.group(1)
-            elif fence == match.group(1):
-                fence = None
-        elif fence is None:
+        fence, match = common.fence_step(fence, line)
+        if not match and fence is None:
             heading_match = _SECTION_RE.match(line.rstrip("\r\n"))
             if heading_match:
                 if inside:
@@ -510,10 +536,12 @@ def _check_page(wt, pre_sha, status, path, domain, index, other, allow, terms, p
     a live page (not deleted, not a draft)."""
     full = os.path.join(wt, path)
     old = blob_at(wt, pre_sha, path) if status not in ("?", "A") else None
+    old_guard = notes_guard(old.decode("utf-8", "replace")) if old is not None else None
     if status == "D":
-        if old is not None:
-            tail = notes_tail(old.decode("utf-8", "replace"))
-            if tail and tail.strip() != common.MY_NOTES_HEADING:
+        if old_guard is not None:
+            if old_guard.startswith(HIDDEN_NOTES_MARK):
+                problems.append("my_notes_unlocatable:%s" % path)
+            elif old_guard and old_guard.strip() != common.MY_NOTES_HEADING:
                 problems.append("my_notes_changed:%s" % path)
         return False
     if not path.endswith(".md"):
@@ -539,7 +567,10 @@ def _check_page(wt, pre_sha, status, path, domain, index, other, allow, terms, p
         problems.append("page_domain_mismatch:%s" % path)
     main_part, notes = common.split_my_notes(body)
     if old is not None:
-        if not same_notes(notes_tail(old.decode("utf-8", "replace")), notes):
+        if old_guard.startswith(HIDDEN_NOTES_MARK):
+            if not same_notes(old_guard, notes_guard(text)):
+                problems.append("my_notes_unlocatable:%s" % path)
+        elif not same_notes(old_guard, notes_guard(text)):
             problems.append("my_notes_changed:%s" % path)
     elif notes.strip() not in ("", common.MY_NOTES_HEADING):
         # A page the LLM creates may only end with an empty heading: text
@@ -557,7 +588,7 @@ def _check_page(wt, pre_sha, status, path, domain, index, other, allow, terms, p
     if (crosses_domain(main_part, other, other_names)
             or crosses_domain(fm_strings(fm), other, other_names)):
         problems.append("cross_domain_link:%s" % path)
-    if redact.scan(text, allow):
+    if redact.scan(text, allow, index.known_ids()):
         problems.append("secret_found:%s" % path)
     if domain == "personal" and personal_term_hit(terms, path, main_part, fm):
         problems.append("work_terms_hit:%s" % path)
@@ -613,7 +644,7 @@ def check_batch(wt, pre_sha, batch, entries, domains_cfg, extra_sources=()):
                 # An open fence would swallow the root file's later
                 # sections, '## 내 메모' included, once assembled.
                 problems.append("draft_unbalanced_fence:%s" % path)
-            if redact.scan(text, allow):
+            if redact.scan(text, allow, index.known_ids()):
                 problems.append("secret_found:%s" % path)
             if domain == "personal" and terms.hits(strip_src_comments(text)):
                 problems.append("work_terms_hit:%s" % path)
@@ -684,7 +715,7 @@ def notes_snapshot(wt, paths):
         full = os.path.join(wt, rel)
         if os.path.isfile(full):
             try:
-                snap[rel] = notes_tail(read_text(full))
+                snap[rel] = notes_guard(read_text(full))
             except UnicodeDecodeError:
                 # Not UTF-8 (e.g. a CP949 export): check_batch already failed
                 # the batch if the LLM changed it, and Python's alias and
@@ -698,7 +729,7 @@ def assert_notes_unchanged(wt, snapshot):
     for rel, tail in snapshot.items():
         full = os.path.join(wt, rel)
         try:
-            same = os.path.isfile(full) and same_notes(tail, notes_tail(read_text(full)))
+            same = os.path.isfile(full) and same_notes(tail, notes_guard(read_text(full)))
         except UnicodeDecodeError:
             same = False
         if not same:
@@ -880,7 +911,15 @@ def clean_mentions(mentions, domain, terms, allow):
                                    if clean_name(name, domain, terms, allow))
 
 
-def recheck_pages(wt, domain, paths, domains_cfg):
+def known_source_ids(entries, extra_sources=()):
+    """sources.json ids plus this run's batch source ids: what redact may
+    exempt inside src comments (fix round 1)."""
+    ids = set(entries or {})
+    ids.update(source["id"] for source in extra_sources or () if source.get("id"))
+    return ids
+
+
+def recheck_pages(wt, domain, paths, domains_cfg, known_ids=None):
     """Contract-4 and (personal) work_terms check, frontmatter included, of
     pages Python changed after check_batch (aliases, links). Raises
     BatchFailure."""
@@ -900,7 +939,7 @@ def recheck_pages(wt, domain, paths, domains_cfg):
         except UnicodeDecodeError:
             problems.append("page_unreadable:%s" % rel)
             continue
-        if redact.scan(text, allow):
+        if redact.scan(text, allow, known_ids):
             problems.append("secret_found:%s" % rel)
         fm, _err, body, _nl = page_split(text)
         main_part = common.split_my_notes(body)[0]
@@ -963,12 +1002,8 @@ def _link_once(text, regexes, link_target):
     lines = text.splitlines(True)
     fence = None
     for index, line in enumerate(lines):
-        match = _FENCE_RE.match(line)
+        fence, match = common.fence_step(fence, line)
         if match:
-            if fence is None:
-                fence = match.group(1)
-            elif fence == match.group(1):
-                fence = None
             continue
         if fence or _HEADING_RE.match(line) or line.lstrip().startswith("<!--"):
             continue
@@ -1090,14 +1125,9 @@ def _split_sections(text):
     sections = []
     fence = None
     for line in text.splitlines(True):
-        match = _FENCE_RE.match(line)
+        fence, match = common.fence_step(fence, line)
         heading = None
-        if match:
-            if fence is None:
-                fence = match.group(1)
-            elif fence == match.group(1):
-                fence = None
-        elif fence is None:
+        if not match and fence is None:
             heading = _SECTION_RE.match(line.rstrip("\r\n"))
         if heading:
             sections.append([heading.group(1).strip(), []])
@@ -1113,13 +1143,8 @@ def _demote(text):
     out = []
     fence = None
     for line in text.splitlines(True):
-        match = _FENCE_RE.match(line)
-        if match:
-            if fence is None:
-                fence = match.group(1)
-            elif fence == match.group(1):
-                fence = None
-        elif fence is None:
+        fence, match = common.fence_step(fence, line)
+        if not match and fence is None:
             if re.match(r"^# ", line):
                 continue
             if re.match(r"^#{2,5} ", line):
@@ -1249,7 +1274,7 @@ def apply_paused(wt, now):
     return changed
 
 
-def scan_tree(wt, allow):
+def scan_tree(wt, allow, known_ids=None):
     """Contract 4 over the whole wiki tree (worktree files, .git excluded).
     Returns ['<path>:<kinds>'] for every hit."""
     hits = []
@@ -1265,7 +1290,7 @@ def scan_tree(wt, allow):
                 text = read_text(full)
             except (IOError, OSError, UnicodeDecodeError):
                 continue
-            kinds = redact.scan(text, allow)
+            kinds = redact.scan(text, allow, known_ids)
             if kinds:
                 rel = os.path.relpath(full, wt).replace(os.sep, "/")
                 hits.append("%s:%s" % (rel, ",".join(sorted(kinds))))
@@ -1310,9 +1335,7 @@ def _state_blocks(text):
     for line in text.splitlines(True):
         if fence is not None:
             current.append(line)
-            match = _FENCE_RE.match(line)
-            if match and match.group(1) == fence:
-                fence = None
+            fence, _match = common.fence_step(fence, line)
             continue
         if not line.strip():
             if current:
@@ -1324,9 +1347,7 @@ def _state_blocks(text):
             blocks.append(current)
             current = []
         current.append(line)
-        match = _FENCE_RE.match(line)
-        if match:
-            fence = match.group(1)
+        fence, _match = common.fence_step(fence, line)
     if current:
         blocks.append(current)
     return blocks
@@ -1405,14 +1426,9 @@ def _replace_section(body, heading, new_text):
     state = "before"  # before -> inside -> after
     fence = None
     for line in body.splitlines(True):
-        match = _FENCE_RE.match(line)
+        fence, match = common.fence_step(fence, line)
         is_heading = None
-        if match:
-            if fence is None:
-                fence = match.group(1)
-            elif fence == match.group(1):
-                fence = None
-        elif fence is None:
+        if not match and fence is None:
             is_heading = _SECTION_RE.match(line.rstrip("\r\n"))
         if state == "before" and is_heading and is_heading.group(1).strip() == heading:
             out.append(line)
@@ -1429,10 +1445,11 @@ def _replace_section(body, heading, new_text):
 
 
 def expire_handoff_state(wt, now):
-    """D10: a project's '## 현재 상태' that rests only on handoff sources
-    older than 14 days is emptied (heading kept). Otherwise each item
-    (list item or paragraph) whose srcs are all such handoff sources is
-    dropped. '## 내 메모' is never touched. Returns changed paths."""
+    """D10: each item (list item or paragraph, see _state_units) of a
+    project's '## 현재 상태' whose srcs are all handoff sources older than
+    14 days is dropped; a section left with nothing is emptied (heading
+    kept). Units without a src stay. '## 내 메모' is never touched.
+    Returns changed paths."""
     cutoff = (now - datetime.timedelta(days=AS_OF_DAYS)).strftime("%Y-%m-%d")
     heading = common.CURRENT_STATE_HEADING[3:]
     changed = []
@@ -1444,12 +1461,13 @@ def expire_handoff_state(wt, now):
             state = section_text(main_part, heading)
             if not state.strip():
                 continue
-            if _handoff_expired(state, cutoff):
+            # Always per unit (fix round 1): a line without a src cannot be
+            # dated, so it stays even when every dated unit is stale (D1).
+            new_state = _expire_items(state, cutoff)
+            if new_state == state:
+                continue
+            if not new_state.strip():
                 new_state = "\n"
-            else:
-                new_state = _expire_items(state, cutoff)
-                if new_state == state:
-                    continue
             full = os.path.join(wt, page.path)
             text = read_text(full)
             _fm_text, body, _nl = common.split_frontmatter(text)
