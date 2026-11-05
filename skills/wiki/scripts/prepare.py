@@ -742,6 +742,11 @@ def discover_root_notes(root, warnings):
         if stray:
             warnings.append("my_notes_untagged:%s" % name)
         _before, notes = common.split_my_notes(text)
+        if common.my_notes_ambiguous(notes):
+            # Fix round 2: no domain's part is staged; the source already
+            # recorded stays as it was (notes are not a deletable kind).
+            warnings.append("my_notes_unbalanced_fence:%s" % name)
+            continue
         for domain in common.DOMAINS:
             part = common.my_notes_subsection(notes, domain)
             if not part.strip():
@@ -1176,11 +1181,18 @@ def plan_sources(root, items, scanned_kinds, sources, paths, resolver, domains):
     plan.known_ids = set(entries) | set(item["id"] for item in items)
     known = plan.known_ids
     present = set()
+    id_secrets = 0
     for item in items:
         source_id = item["id"]
         present.add(source_id)
         entry = entries.get(source_id)
         forced = item.get("forced_status")
+        if not forced and redact.scan("<!-- src: %s @2000-01-01 -->" % source_id, allow, known):
+            # Fix round 2: a known id gets the short-parts check too, so an
+            # id made from a folder with random short parts would fail every
+            # batch whose pages cite it. It stays out of batches instead.
+            forced = STATUS_UNRESOLVED
+            id_secrets += 1
         if forced:
             domain, step = None, None
         else:
@@ -1244,6 +1256,8 @@ def plan_sources(root, items, scanned_kinds, sources, paths, resolver, domains):
                              "entry": entry, "date": (entry or {}).get("date")
                              or item["date"]})
 
+    if id_secrets:
+        plan.warnings.append("source_id_secret:%d" % id_secrets)
     # Disappeared sources.
     vanished = collections.defaultdict(list)
     active_by_kind = collections.Counter()

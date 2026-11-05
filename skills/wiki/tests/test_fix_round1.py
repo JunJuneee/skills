@@ -253,8 +253,15 @@ class FenceRulesTest(unittest.TestCase):
                  "### personal\n\n개인 메모\n" % canary)
         personal = common.my_notes_subsection(notes, "personal")
         self.assertNotIn(canary, personal)
-        self.assertEqual(personal.strip(), "개인 메모")
-        self.assertIn(canary, common.my_notes_subsection(notes, "work"))
+        # Fix round 2: a '### <domain>' line inside a fence leaves the
+        # borders in doubt (an unclosed fence reads the same), so no domain
+        # gets any of it.
+        self.assertEqual(personal, "")
+        self.assertEqual(common.my_notes_subsection(notes, "work"), "")
+        other = ("## 내 메모\n\n### work\n\n```\n### 예시\n%s\n```\n\n"
+                 "### personal\n\n개인 메모\n" % canary)
+        self.assertEqual(common.my_notes_subsection(other, "personal").strip(), "개인 메모")
+        self.assertIn(canary, common.my_notes_subsection(other, "work"))
 
     def test_longer_fence_is_not_closed_by_a_shorter_one(self):
         body = ("## 요약\n\n````md\n예시:\n```\n## 내 메모\n```\n````\n\n"
@@ -338,25 +345,30 @@ class ForeignRulesTest(_helpers.TempHomeCase):
         os.symlink(self.rules_dir, os.path.join(shared, "back"))
         self.assertEqual(absorb.foreign_user_rules(self.env), 1)
 
+    def count(self, rules_path=None):
+        return absorb.foreign_user_rules(self.env, rules_path, self.root, verify.Terms([]))
+
     def test_own_file_is_trusted_by_content_not_name(self):
         own = os.path.join(self.rules_dir, absorb.RULES_FILENAME)
         self.write(own, verify.rules_text(["- 답변은 짧게"]))
-        self.assertEqual(absorb.foreign_user_rules(self.env), 0)
+        absorb.record_rules_write(self.root, own, ["- 답변은 짧게"])
+        self.assertEqual(self.count(), 0)
         self.write(own, "# 회사 규칙\n\n배포 전에 확인\n")
-        self.assertEqual(absorb.foreign_user_rules(self.env), 1)
+        self.assertEqual(self.count(), 1)
         os.remove(own)
         real = os.path.join(self.tmp, "elsewhere.md")
         self.write(real, verify.rules_text(["- 답변은 짧게"]))
         os.symlink(real, own)
-        self.assertEqual(absorb.foreign_user_rules(self.env), 1)
+        self.assertEqual(self.count(), 1)
 
     def test_rules_path_does_not_hide_a_foreign_file(self):
         team = os.path.join(self.rules_dir, "team.md")
         self.write(team, "- 팀 규칙\n")
-        self.assertEqual(absorb.foreign_user_rules(self.env), 1)
-        self.assertEqual(absorb.foreign_user_rules(self.env, rules_path=team), 1)
+        self.assertEqual(self.count(), 1)
+        self.assertEqual(self.count(rules_path=team), 1)
         self.write(team, verify.rules_text(["- 답변은 짧게"]))
-        self.assertEqual(absorb.foreign_user_rules(self.env, rules_path=team), 0)
+        absorb.record_rules_write(self.root, team, ["- 답변은 짧게"])
+        self.assertEqual(self.count(rules_path=team), 0)
 
 
 if __name__ == "__main__":
@@ -372,17 +384,21 @@ import json, os, sys, urllib.request
 if "--version" in sys.argv:
     print("0.0.0 (fake)")
     sys.exit(0)
-sys.stdin.read()
+prompt = sys.stdin.read()
 config = os.environ.get("CLAUDE_CONFIG_DIR") or os.path.join(os.environ["HOME"], ".claude")
 isolated = "--setting-sources" in sys.argv or os.environ.get("CLAUDE_CODE_DISABLE_CLAUDE_MDS")
 parts = []
-leak = os.path.exists(os.path.join(os.path.dirname(os.path.abspath(sys.argv[0])), "leak"))
+here = os.path.dirname(os.path.abspath(sys.argv[0]))
+leak = os.path.exists(os.path.join(here, "leak"))
+if isolated and os.path.exists(os.path.join(here, "silent")):
+    sys.exit(7)
 if not isolated or leak:
     for dirpath, dirnames, filenames in os.walk(os.path.join(config, "rules"), followlinks=True):
         parts += [open(os.path.join(dirpath, n)).read() for n in filenames]
 if not isolated:
     parts.append(open(os.path.join(config, "CLAUDE.md")).read())
-body = json.dumps({"system": "\n".join(parts)}).encode()
+body = json.dumps({"system": "\n".join(parts),
+                   "messages": [{"role": "user", "content": prompt}]}).encode()
 request = urllib.request.Request(os.environ["ANTHROPIC_BASE_URL"] + "/v1/messages", data=body)
 try:
     urllib.request.urlopen(request, timeout=10)

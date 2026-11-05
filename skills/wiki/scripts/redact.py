@@ -46,12 +46,18 @@ and a word-like look is no exception by itself; dev:redact_path_rules):
   verify passes the batch's SourceIndex ids, scan_tree and prepare the
   sources.json ids). An unknown id in a src-shaped comment is plain text,
   so a comment cannot launder a token into a page, draft or frontmatter.
-- Before any path exemption, the short parts of a candidate are checked
-  together (_short_parts_kind, fix round 1): hex parts with a digit joined
-  by the hex rule, and what is left once words of five or more letters,
-  digit runs and one worktree-suffix hex part per segment are cut out by
-  the entropy rule. Dashed or slashed short chunks no longer pass as a
-  path.
+- Before any path or source-id exemption, the short parts of a candidate
+  are checked together (_short_parts_kind, fix round 1): hex parts with a
+  digit joined by the hex rule, and what is left once words of five or
+  more letters, digit runs and one worktree-suffix hex part per segment
+  are cut out by the entropy rule. Dashed or slashed short chunks no
+  longer pass as a path. Fix round 2: those words are cut out only when
+  their letter pairs read like English on average (an embedded pair
+  table), over their segment and over the whole candidate, so random
+  letter words (a/Qwerty/Zxcvbn/..., docs/<8>-<8>-<8>) stay in what is
+  checked; in a segment of four or more equal-length (4-6) parts,
+  digit-only parts stay too (product-key shape ABCD-1234-...). A known
+  source id gets the same check before its exemption.
 - Any path or source id segment with a part (split on -_.) that is itself
   a 24+ char high-entropy token is still redacted.
 - A word-shaped part is lower, UPPER, Capitalized, digits, or case humps
@@ -155,6 +161,47 @@ _SRC_COMMENT_RE = re.compile(r"<!--\s*src:\s*((?:%s):\S+)\s+@\d{4}-\d{2}-\d{2}\s
                              % "|".join(SOURCE_KINDS))
 ALLOW_MIN_SUBSTRING = 8
 
+# Letter-pair scores for _pair_score (fix round 2): row = first letter,
+# column = second letter, digit d means log2(P(pair) * 676) ~= d - 5,
+# clipped to [-5, 4]. P was counted once, offline, over the letter pairs
+# of an English word list and of the words in Python's standard library
+# source (identifiers split at case humps); only these 676 digits are
+# kept. Random letters average about -1.7 per pair, English words +1.5.
+_BIGRAM_ROWS = (
+    "47765463615878161878544443",  # a
+    "64436100630621520542500030",  # b
+    "71437217606632821647621040",  # c
+    "63348331710523620553522130",  # d
+    "74786653513768564987454641",  # e
+    "51235520600512610534501030",  # f
+    "51117144600535510542400030",  # g
+    "71127100600333610524401050",  # h
+    "75876561214769761687360406",  # i
+    "30003000101000300000300000",  # j
+    "41126121500303210242202020",  # k
+    "73458321802733740255531070",  # l
+    "75127100701343660143500040",  # m
+    "73778573724435742378542041",  # n
+    "45664463504778671866755422",  # o
+    "71227216601612650755502050",  # p
+    "00000000000000000010500000",  # q
+    "84558453804565840566543060",  # r
+    "62637336704554663378613050",  # s
+    "72538417801543740766623162",  # t
+    "55545440501667350676110100",  # u
+    "50007000500010400000100000",  # v
+    "51125104500203400431001100",  # w
+    "32324201400120240015100330",  # x
+    "32434121300444350354002121",  # y
+    "40005000300000300000000013",  # z
+)
+# Mean pair score the words of the whole candidate, and of a segment with
+# at least SEGMENT_MIN_PAIRS letter pairs in its words, must reach before
+# they are cut out as words (_short_parts_kind). A segment with fewer pairs
+# (one short word such as "keyword") is too little evidence on its own.
+WORDS_MIN_PAIR_SCORE = 0.0
+SEGMENT_MIN_PAIRS = 10
+
 
 def _pronounceable(part):
     """False for alphabetic parts that do not read like a word (see the
@@ -176,6 +223,19 @@ def _pronounceable(part):
 
 def _word_part(part):
     return bool(_WORD_PART_RE.match(part)) and _pronounceable(part)
+
+
+def _pair_score(part):
+    """(sum, count) of the _BIGRAM_ROWS scores of an alphabetic part's
+    letter pairs, case ignored."""
+    low = part.lower()
+    total = 0
+    count = 0
+    for first, second in zip(low, low[1:]):
+        if "a" <= first <= "z" and "a" <= second <= "z":
+            total += int(_BIGRAM_ROWS[ord(first) - 97][ord(second) - 97]) - 5
+            count += 1
+    return total, count
 
 
 def _word_slug(value):
@@ -250,6 +310,15 @@ _SUFFIX_HEX_RE = re.compile(r"^(?:[0-9a-f]{6,16}|[0-9A-F]{6,16})$")
 _EMBEDDED_ID_RE = re.compile(
     r"(?<![0-9A-Fa-f])(?:[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}"
     r"|[0-9a-f]{40}|[0-9A-F]{40})(?![0-9A-Fa-f])")
+# macOS per-user temp folder, plain (var/folders/xx/<id>/T) or encoded in a
+# Claude Code project folder name (-var-folders-xx-<id>-T-..., the "_" in
+# the id encoded as "-"): a file path by construction, cut out like UUIDs
+# before the short-parts check (fix round 2, now that a known source id
+# gets that check too). The id is two alphanumeric runs joined by one "_"
+# or "-", so a run of dashed short chunks in that slot is not cut.
+_DARWIN_TMP_RE = re.compile(
+    r"(?<![A-Za-z0-9])var[-/]folders[-/][0-9a-z_]{2}[-/][0-9a-z]{6,24}[-_][0-9a-z]{6,24}"
+    r"[-/][CTX](?![A-Za-z0-9])")
 
 
 def _short_parts_kind(value):
@@ -267,9 +336,21 @@ def _short_parts_kind(value):
       reach 4.0 too, so cutting words out never makes a hit). Dashed short chunks
       (Kq7Z-p2Wm-..., ab-cd-ef-..., /srv/Kq7Z/p2Wm/...) are caught;
       natural names keep their long words out of it.
-    UUIDs and 40-char SHAs (contract-4 exceptions) are cut out first."""
+    - Fix round 2: the words are cut out only when their letter pairs read
+      like English on average (_pair_score mean >= WORDS_MIN_PAIR_SCORE),
+      over the whole candidate and over their own segment when it holds
+      SEGMENT_MIN_PAIRS letter pairs or more. Random
+      letter words (a/Qwerty/Zxcvbn/..., docs/<8>-<8>-<8>) then stay in
+      what is checked; natural names, which may hold a few odd words
+      among ordinary ones, keep theirs out. In a segment of four or more
+      parts of one length (4-6), digit-only parts stay too (product-key
+      shape ABCD-1234-...).
+    UUIDs and 40-char SHAs (contract-4 exceptions) and the macOS per-user
+    temp folder (_DARWIN_TMP_RE) are cut out first."""
     hex_parts = []
-    weak = []
+    segments = []
+    all_sum = all_count = 0
+    value = _DARWIN_TMP_RE.sub("var-", value)
     for segment in value.split("/"):
         segment = _EMBEDDED_ID_RE.sub("-", segment)
         pieces = _SLUG_KEEP_RE.split(segment)
@@ -278,17 +359,39 @@ def _short_parts_kind(value):
             if _SUFFIX_HEX_RE.match(pieces[index]) and re.search(r"[0-9]", pieces[index]):
                 suffix = index
                 break
-        out = []
+        parts = [piece for piece in pieces if piece and not _SLUG_SPLIT_RE.match(piece)]
+        keyish = len(parts) >= 4 and len(set(len(part) for part in parts)) == 1 and (
+            4 <= len(parts[0]) <= 6)
+        kinds = []
+        seg_sum = seg_count = 0
         for index, piece in enumerate(pieces):
             if not piece or _SLUG_SPLIT_RE.match(piece):
-                out.append(piece)
+                kinds.append("sep")
                 continue
             is_hex = bool(_HEX_RE.match(piece) and re.search(r"[0-9]", piece)
                           and not piece.isdigit())
             if is_hex:
                 hex_parts.append(piece)
-            if index == suffix or piece.isdigit() or (len(piece) >= 5 and _word_part(piece)
-                                                     and not is_hex):
+            if index == suffix or (piece.isdigit() and not keyish):
+                kinds.append("cut")
+            elif len(piece) >= 5 and not is_hex and not piece.isdigit() and _word_part(piece):
+                kinds.append("word")
+                score, count = _pair_score(piece)
+                seg_sum += score
+                seg_count += count
+            else:
+                kinds.append("keep")
+        all_sum += seg_sum
+        all_count += seg_count
+        segments.append((pieces, kinds, seg_sum, seg_count))
+    words_ok = all_sum >= WORDS_MIN_PAIR_SCORE * all_count
+    weak = []
+    for pieces, kinds, seg_sum, seg_count in segments:
+        cut_words = words_ok and (seg_count < SEGMENT_MIN_PAIRS
+                                  or seg_sum >= WORDS_MIN_PAIR_SCORE * seg_count)
+        out = []
+        for piece, kind in zip(pieces, kinds):
+            if kind == "cut" or (kind == "word" and cut_words):
                 out.append("")
             else:
                 out.append(piece)
@@ -335,15 +438,17 @@ def _candidate_kind(value, allow_paths=True, anchored=False, source_id=False):
         return None
     if _dashed_hex(value):
         return "hex" if shannon_entropy(value.replace("-", "")) >= HEX_ENTROPY_THRESHOLD else None
-    if allow_paths and source_id and not any(
-            _segment_is_secret(segment) for segment in value.split("/") if segment):
-        # Only reached for an id the caller checked (redact known_ids): it
-        # was built from real file and folder names (a macOS temp folder
-        # holds random short parts), so only a 24+ char token part counts.
-        return None
+    # Before every exemption, the source-id one included (fix round 2: a
+    # known id is no way around the short-parts check either).
     short_kind = _short_parts_kind(value)
     if short_kind is not None:
         return short_kind
+    if allow_paths and source_id and not any(
+            _segment_is_secret(segment) for segment in value.split("/") if segment):
+        # Only reached for an id the caller checked (redact known_ids): it
+        # was built from real file and folder names, so past the checks
+        # above only a 24+ char token part counts.
+        return None
     if allow_paths and _is_path(value, anchored):
         return None
     if len(value) >= HEX_MIN_LEN and _HEX_RE.match(value):

@@ -39,11 +39,30 @@ def isolated_env(home, extra=None):
     return env
 
 
+_TEMP_COUNTER = [0]
+
+
+def make_temp_dir(prefix="wiki-test-"):
+    """A new private temp dir named <prefix><pid>-<n>. Source ids are built
+    from these paths, and a random mkdtemp suffix (8 letters and digits)
+    reads as a short-chunk token to redact (fix round 2: a known src id
+    gets that check too), so the name holds only words and digits."""
+    base = tempfile.gettempdir()
+    while True:
+        _TEMP_COUNTER[0] += 1
+        path = os.path.join(base, "%s%d-%d" % (prefix, os.getpid(), _TEMP_COUNTER[0]))
+        try:
+            os.mkdir(path, 0o700)
+        except FileExistsError:
+            continue
+        return os.path.realpath(path)
+
+
 class TempHomeCase(unittest.TestCase):
     """Creates self.home (a fake HOME) and self.root (WIKI_ROOT inside it)."""
 
     def setUp(self):
-        self.tmp = os.path.realpath(tempfile.mkdtemp(prefix="wiki-test-"))
+        self.tmp = make_temp_dir()
         self.home = os.path.join(self.tmp, "home")
         os.makedirs(self.home)
         self.root = os.path.join(self.home, "wiki")

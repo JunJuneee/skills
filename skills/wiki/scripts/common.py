@@ -620,14 +620,43 @@ def split_my_notes(body, heading=MY_NOTES_HEADING):
     return body, ""
 
 
+def _structural_heading(stripped):
+    """'## <x>' or '### <domain>': a line that ends or starts a root notes
+    subsection when it is outside code."""
+    if stripped.startswith("## ") and not stripped.startswith("### "):
+        return True
+    return stripped in ["### " + domain for domain in DOMAINS]
+
+
+def my_notes_ambiguous(notes):
+    """True when the subsections of a '## 내 메모' tail cannot be told apart
+    safely (fix round 2): its fences do not balance, or a '## ' or
+    '### <domain>' line sits inside a fence. Either way a fence opened in
+    one domain's subsection may run into the next one (an unclosed ``` in
+    '### personal' swallowing '### work'), or a '### <domain>' line in code
+    may really be a heading after a fence left open: no reading is safe."""
+    fence = None
+    for line in notes.splitlines(True):
+        before = fence
+        fence, is_fence = fence_step(fence, line)
+        if before is not None and not is_fence and _structural_heading(
+                line.rstrip("\r\n").rstrip()):
+            return True
+    return fence is not None
+
+
 def my_notes_subsection(notes, domain):
     """Text of '### <domain>' inside a '## 내 메모' tail (root now/about-me).
 
     Root pages keep one subsection per domain so a batch only ever sees its
     own domain's notes. Text directly under '## 내 메모' is never staged.
-    Headings inside fenced code are code (fix round 1): a '### personal'
-    line in a work code block does not start the personal subsection.
+    Fenced code is tracked (fix round 1), and when that tracking leaves the
+    subsection borders in doubt (my_notes_ambiguous: fences that do not
+    balance, or a '## '/'### <domain>' line inside a fence) every domain
+    gets "" (fix round 2): no domain's notes reach another domain's batch.
     """
+    if my_notes_ambiguous(notes):
+        return ""
     wanted = "### " + domain
     out = []
     inside = False
@@ -1156,14 +1185,18 @@ PLAN_DEVIATIONS = (
     "redact_path_rules:contract-4 file-path exception made concrete: path-like segments only, "
     "src-comment source ids the caller knows (sources.json, this run), existing page file "
     "names and Claude Code project folders after projects/; short parts rechecked together "
-    "first; no bare-slug exemption; redact_allow also matches a containing or contained "
-    "entry",
+    "first (words cut out only when their letter pairs read like English, the macOS temp "
+    "folder cut out, known ids included; an id that is itself a hit keeps its source out of "
+    "batches, source_id_secret:<n>); no bare-slug exemption; redact_allow also matches a "
+    "containing or contained entry",
     "root_assembly_guard:a draft with an open code fence fails its batch "
     "(draft_unbalanced_fence); a root file that cannot be reassembled safely is left as it is "
     "(root_file_skipped:<name>), never a failed run",
     "user_rules_guard:personal batches refuse to run while the user rules folder (symlinked "
-    "folders followed) holds .md files other than the wiki rules file, recognised by shape "
-    "(user_rules_unisolated); kept after the 2.1.318 measurement as belt-and-braces",
+    "folders followed) holds .md files other than the wiki rules file, recognised by shape, "
+    "by the sha256 absorb recorded when it wrote it (.state/rules-written.json) and by no "
+    "work_terms hit (user_rules_unisolated); kept after the 2.1.318 measurement as "
+    "belt-and-braces",
     "home_terms:work_terms are matched after the home folder (absolute and Claude Code "
     "encoded form) is replaced by ~",
     "query_domain_conflict:query --domain cannot name the other domain in a decided cwd "

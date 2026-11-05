@@ -31,6 +31,12 @@ How, without a login, a cost or a write to the real ~/.claude:
   `env_only` (plain `claude -p` with them) and the mandatory positive
   `control` (plain `claude -p`, no DISABLE variables). A canary the
   control does not show is INCONCLUSIVE, never "hidden".
+- A run counts only its valid model requests: a POST to /v1/messages
+  whose JSON body has "messages" and carries the probe prompt (fix round
+  2). The exit code proves nothing (the server always answers 400). When
+  the `absorb` run of a variant made no valid request, every group of that
+  variant is INCONCLUSIVE: a canary missing from no request is no
+  evidence of isolation.
 - A read-only listing of the real ~/.claude/projects is taken before and
   after; new entries are reported (another session can add one meanwhile).
 
@@ -164,6 +170,22 @@ def _projects_listing(base):
         return set()
 
 
+PROMPT_MARK = "starts with CANARY- found anywhere"
+
+
+def valid_request(path, body):
+    """A model request carrying the probe prompt (see the module notes)."""
+    if not (path or "").split("?", 1)[0].rstrip("/").endswith("/v1/messages"):
+        return False
+    try:
+        data = json.loads(body.decode("utf-8", "replace"))
+    except ValueError:
+        return False
+    if not isinstance(data, dict) or not isinstance(data.get("messages"), list):
+        return False
+    return PROMPT_MARK in json.dumps(data["messages"], ensure_ascii=False)
+
+
 def _run(argv, env, cwd, capture):
     capture.take()
     try:
@@ -173,8 +195,9 @@ def _run(argv, env, cwd, capture):
     except subprocess.TimeoutExpired:
         code = "timeout"
     bodies = capture.take()
+    valid = sum(1 for path, body in bodies if valid_request(path, body))
     text = b"\n".join(body for _path, body in bodies).decode("utf-8", "replace")
-    return code, len(bodies), text
+    return code, len(bodies), valid, text
 
 
 def measure(claude, keep=False, projects_dir=None):
@@ -239,8 +262,8 @@ def measure(claude, keep=False, projects_dir=None):
             seen = {}
             requests = {}
             for name, (argv, env) in runs.items():
-                code, count, text = _run(argv, env, cwd, capture)
-                requests[name] = {"requests": count, "exit": code}
+                code, count, valid, text = _run(argv, env, cwd, capture)
+                requests[name] = {"requests": count, "valid": valid, "exit": code}
                 seen[name] = sorted(place for place, token in canaries.items() if token in text)
             verdicts = {}
             for group in sorted(set(group_of(place) for place in canaries)):
@@ -249,7 +272,7 @@ def measure(claude, keep=False, projects_dir=None):
                 # own; they are reported, only `absorb` decides LEAK.
                 if in_group("absorb"):
                     verdicts[group] = "LEAK"
-                elif not in_group("control"):
+                elif not requests["absorb"]["valid"] or not in_group("control"):
                     verdicts[group] = "INCONCLUSIVE"
                 else:
                     verdicts[group] = "hidden"
@@ -290,8 +313,8 @@ def main(argv=None):
     else:
         print("claude %s: %s" % (report.get("claude_version"), report["result"]))
         for variant, data in report["variants"].items():
-            print("[%s] requests %s" % (variant, ", ".join(
-                "%s=%s" % (k, v["requests"]) for k, v in data["runs"].items())))
+            print("[%s] valid/all requests %s" % (variant, ", ".join(
+                "%s=%s/%s" % (k, v["valid"], v["requests"]) for k, v in data["runs"].items())))
             for group, verdict in data["verdicts"].items():
                 print("  %-22s %s (control saw: %s)" % (group, verdict, ", ".join(
                     p for p in data["seen"]["control"] if group_of(p) == group) or "-"))

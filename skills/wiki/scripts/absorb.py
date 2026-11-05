@@ -41,6 +41,7 @@ The LLM step is injectable (`runner`) so tests never call a real model.
 import collections
 import copy
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -63,6 +64,9 @@ LAST_REPORT = "last-report.json"
 DRAFTS_STORE = "drafts"
 BACKUPS_DIR = "backups"
 RULES_FILENAME = "wiki-prefs.md"
+# .state/<this>: {realpath of a rules file: sha256 of the text absorb last
+# wrote there} (fix round 2: the rules file is trusted by provenance).
+RULES_RECORD = "rules-written.json"
 RUNNING_FILE = "absorb-running.json"
 
 LLM_TOOLS = "Read,Edit,Write,Glob,Grep"
@@ -144,16 +148,17 @@ def llm_env(environ, claude_path):
     return env
 
 
-def foreign_user_rules(environ, rules_path=None):
+def foreign_user_rules(environ, rules_path=None, root=None, terms=None):
     """Number of .md files in the user rules folder the LLM's claude would
     see (CLAUDE_CONFIG_DIR, else HOME/.claude; llm_env passes both),
     symlinked folders included, other than the wiki's own rules file
-    (_own_rules_file). scripts/isolation_probe.py measured that folder
-    hidden from the model on 2.1.318 by two independent layers; any other
-    rules file (an employer's workflow rules, say) could still carry work
-    text into a personal batch if a later claude loaded it, so personal
-    batches keep refusing to run while such files exist
-    (user_rules_unisolated, belt-and-braces)."""
+    (_own_rules_file: needs the wiki root's RULES_RECORD and the work_terms
+    matcher; without root every file counts). scripts/isolation_probe.py
+    measured that folder hidden from the model on 2.1.318 by two
+    independent layers; any other rules file (an employer's workflow
+    rules, say) could still carry work text into a personal batch if a
+    later claude loaded it, so personal batches keep refusing to run while
+    such files exist (user_rules_unisolated, belt-and-braces)."""
     config = (environ.get("CLAUDE_CONFIG_DIR") or "").strip()
     if not config:
         home = environ.get("HOME") or os.path.expanduser("~")
@@ -164,6 +169,7 @@ def foreign_user_rules(environ, rules_path=None):
     count = 0
     own = [os.path.join(base, RULES_FILENAME)] + ([rules_path] if rules_path else [])
     own = set(os.path.realpath(path) for path in own)
+    record = read_rules_record(root) if root else {}
     # followlinks (fix round 1): shared or employer rules are typically a
     # symlinked folder; visited realpaths stop a symlink loop.
     visited = set()
@@ -178,17 +184,49 @@ def foreign_user_rules(environ, rules_path=None):
             if not name.endswith(".md"):
                 continue
             full = os.path.join(dirpath, name)
-            if os.path.realpath(full) in own and _own_rules_file(full):
+            if os.path.realpath(full) in own and _own_rules_file(full, record, terms):
                 continue
             count += 1
     return count
 
 
-def _own_rules_file(path):
+def _sha256_text(text):
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
+
+
+def read_rules_record(root):
+    """{realpath: sha256} from .state/RULES_RECORD ({} when missing or bad)."""
+    try:
+        with open(os.path.join(common.state_dir(root), RULES_RECORD), "r",
+                  encoding="utf-8") as handle:
+            data = json.load(handle)
+    except (IOError, OSError, ValueError):
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return dict((key, value) for key, value in data.items()
+                if isinstance(key, str) and isinstance(value, str))
+
+
+def record_rules_write(root, path, lines):
+    """Remember the sha256 of the rules text absorb just wrote (or found
+    already written) at path, for _own_rules_file."""
+    record = read_rules_record(root)
+    record[os.path.realpath(path)] = _sha256_text(verify.rules_text(lines))
+    state = common.state_dir(root)
+    common.ensure_private_dir(state)
+    common.atomic_write_text(os.path.join(state, RULES_RECORD),
+                             json.dumps(record, ensure_ascii=False, indent=2, sort_keys=True)
+                             + "\n", mode=0o600)
+
+
+def _own_rules_file(path, record=None, terms=None):
     """True only for a regular file (no symlink) whose text has the shape
-    verify.rules_text writes: RULES_HEADER, then '- ' lines only. A file
-    merely named wiki-prefs.md or passed as --rules-path is not trusted by
-    its name (fix round 1)."""
+    verify.rules_text writes (RULES_HEADER, then '- ' lines only), is
+    exactly the text absorb last wrote there (sha256 in RULES_RECORD) and
+    hits no work_terms. A file merely named wiki-prefs.md or passed as
+    --rules-path is not trusted by its name (fix round 1), nor by its shape
+    (fix round 2: a same-shaped file with work text, or an edited one)."""
     if os.path.islink(path) or not os.path.isfile(path):
         return False
     try:
@@ -197,7 +235,11 @@ def _own_rules_file(path):
         return False
     if not text.startswith(verify.RULES_HEADER):
         return False
-    return all(line.startswith("- ") for line in text[len(verify.RULES_HEADER):].splitlines())
+    if not all(line.startswith("- ") for line in text[len(verify.RULES_HEADER):].splitlines()):
+        return False
+    if (record or {}).get(os.path.realpath(path)) != _sha256_text(text):
+        return False
+    return terms is not None and not terms.hits(text)
 
 
 def probe_claude(claude_path, env, timeout=PROBE_TIMEOUT):
@@ -1036,7 +1078,9 @@ def _run(root, environ, paths, now, runner, rules_path, scheduled, fs_root, remo
                "domains": domains_cfg,
                "working_sources": copy.deepcopy(prepare.load_sources(root)), "run_sources": [],
                "runner": runner, "runner_error": None, "private": {},
-               "foreign_rules": foreign_user_rules(environ, rules_path)}
+               "foreign_rules": foreign_user_rules(
+                   environ, rules_path, root,
+                   verify.Terms(domains_cfg.get("work_terms", [])))}
         if ctx["foreign_rules"]:
             report["warnings"].append("user_rules_present:%d" % ctx["foreign_rules"])
         if run["batches"]:
@@ -1225,6 +1269,7 @@ def _post_merge(ctx, report, prep_json, run, rules_path, merged):
         lines = verify.rules_lines(wt, domains_cfg, prepare.load_sources(root)["sources"])
         added, removed = verify.write_rules(rules_path, lines, os.path.join(state, BACKUPS_DIR),
                                             run["run_id"])
+        record_rules_write(root, rules_path, lines)
         report["rules_added"], report["rules_removed"] = added, removed
     except (common.WikiError, IOError, OSError) as exc:
         report["warnings"].append("rules_write_failed:%s" % getattr(exc, "reason", "io"))

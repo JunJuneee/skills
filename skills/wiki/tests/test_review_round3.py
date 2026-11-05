@@ -274,10 +274,13 @@ class MinorsRound3Test(ta.AbsorbCase):
 
     def test_foreign_user_rules_stop_personal_batches_only(self):
         rules_dir = os.path.join(self.home, ".claude", "rules")
-        ta.write(os.path.join(rules_dir, "wiki-prefs.md"), verify.rules_text(["- 답변은 짧게"]))
-        self.assertEqual(absorb.foreign_user_rules(self.env), 0)
+        own = os.path.join(rules_dir, "wiki-prefs.md")
+        ta.write(own, verify.rules_text(["- 답변은 짧게"]))
+        absorb.record_rules_write(self.root, own, ["- 답변은 짧게"])
+        terms = verify.Terms([ta.TERM])
+        self.assertEqual(absorb.foreign_user_rules(self.env, None, self.root, terms), 0)
         ta.write(os.path.join(rules_dir, "team", "workflow.md"), "- 팀 규칙\n")
-        self.assertEqual(absorb.foreign_user_rules(self.env), 1)
+        self.assertEqual(absorb.foreign_user_rules(self.env, None, self.root, terms), 1)
         self.add_memory(self.repo, "feedback_lang.md", "답변은 한국어로.")
         self.add_memory(self.work_repo, "feedback_w.md", "리뷰는 짧게.")
 
