@@ -178,7 +178,7 @@ HIDDEN_NOTES_MARK = "\x00hidden-notes\x00"
 
 
 def _body_notes_hidden(body):
-    raw = any(line.rstrip() == common.MY_NOTES_HEADING for line in body.splitlines())
+    raw = any(common.is_my_notes_heading(line) for line in body.splitlines())
     return raw and not common.split_my_notes(body)[1]
 
 
@@ -236,7 +236,7 @@ def root_assemblable(current):
     notes from the assembler and drop them)."""
     if not fences_balanced(current):
         return False
-    raw_heading = any(line.rstrip() == common.MY_NOTES_HEADING
+    raw_heading = any(common.is_my_notes_heading(line)
                       for line in (current or "").splitlines())
     return not raw_heading or bool(notes_tail(current))
 

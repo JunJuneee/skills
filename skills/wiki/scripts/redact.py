@@ -12,7 +12,12 @@ Order of checks:
   3. known token prefixes (GitHub, Slack, Anthropic, OpenAI, AWS, Google,
      GitLab, Stripe) and JWTs
   4. "Bearer <token>"
-  5. assignments (password=..., api_key: ..., *_TOKEN=...)
+  5. assignments (password=..., api_key: ..., *_TOKEN=...). Fix round 3:
+     a value ends at a backtick (`password: hunter22` keeps its closing
+     backtick), placeholders such as REPLACE_ME or your_api_key stay, and
+     an AWS IAM action or ARN of Secrets Manager
+     (secretsmanager:GetSecretValue, arn:aws:secretsmanager:...) is a
+     name, not an assignment.
   6. high entropy (contract 4): [A-Za-z0-9+/=_-]{24,} with Shannon entropy
      >= 4.0, or hex {32,} with entropy >= 3.0
 
@@ -57,7 +62,14 @@ and a word-like look is no exception by itself; dev:redact_path_rules):
   letter words (a/Qwerty/Zxcvbn/..., docs/<8>-<8>-<8>) stay in what is
   checked; in a segment of four or more equal-length (4-6) parts,
   digit-only parts stay too (product-key shape ABCD-1234-...). A known
-  source id gets the same check before its exemption.
+  source id gets the same check before its exemption. Fix round 3: a
+  word that parses as romanized Korean (Revised Romanization syllables,
+  every CamelCase hump on its own: bokhye, iljeong, JeongMinsu) is
+  neutral in that average, neither for nor against, since its letter
+  pairs are not English (docs/bokhye-iljeong-rokmin-sapyo.md is a file
+  path, contract 4). A random word parses so by chance at about 2.4%
+  (5 letters), 1.1% (6) and 0.4% (8); being neutral, it never lifts a
+  random neighbour over the bar.
 - Any path or source id segment with a part (split on -_.) that is itself
   a 24+ char high-entropy token is still redacted.
 - A word-shaped part is lower, UPPER, Capitalized, digits, or case humps
@@ -114,7 +126,15 @@ _ASSIGN_KEY = (r"(?:password|passwd|pwd|secret|token|api[_-]?key|apikey|access[_
                r"|private[_-]?key|client[_-]?secret|credentials?|auth[_-]?key)")
 _ASSIGN_RE = re.compile(
     r"(?i)(?P<key>\b[A-Za-z0-9_.-]*" + _ASSIGN_KEY + r"[A-Za-z0-9_.-]*)"
-    r"(?P<sep>[\"']?[ \t]*[:=][ \t]*)(?P<q>[\"']?)(?P<val>[^\s\"',;)}\]]{6,})")
+    r"(?P<sep>[\"']?[ \t]*[:=][ \t]*)(?P<q>[\"'`]?)(?P<val>[^\s\"'`,;)}\]]{6,})")
+# AWS service prefixes that _ASSIGN_KEY matches: "<prefix>:<Action>" in an
+# IAM policy or "arn:aws:<prefix>:..." is a name (fix round 3).
+_IAM_SERVICE_KEYS = frozenset(("secretsmanager",))
+_IAM_ACTION_RE = re.compile(r"^(?:[A-Z][a-z0-9]+)+\*?$")
+_ARN_PREFIX_RE = re.compile(r"(?i)\barn:aws(?:-[a-z]+)*:$")
+_PLACEHOLDER_WORD_RE = re.compile(
+    r"(?i)^(?:replace[_-]?me|change[_-]?me|your[_-][a-z0-9_-]+|dummy|placeholder|todo|tbd"
+    r"|x{3,}|\*{3,})$")
 _CANDIDATE_RE = re.compile(r"(?<![A-Za-z0-9+/=_-])[A-Za-z0-9+/=_-]{%d,}(?![A-Za-z0-9+/=_-])"
                            % ENTROPY_MIN_LEN)
 _HEX_RE = re.compile(r"^[0-9A-Fa-f]+$")
@@ -202,6 +222,17 @@ _BIGRAM_ROWS = (
 WORDS_MIN_PAIR_SCORE = 0.0
 SEGMENT_MIN_PAIRS = 10
 
+# Revised Romanization of Korean (fix round 3, _romanized): a syllable is
+# an optional initial, a vowel and an optional final. Common name
+# spellings outside RR (Lee, Yoon, Choi, Joon) parse too; Park, Shin do
+# not and are English-like enough anyway.
+_RR_INITIALS = ("kk", "tt", "pp", "ss", "jj", "ch", "g", "n", "d", "r", "l", "m", "b", "s",
+                "j", "k", "t", "h", "p", "")
+_RR_VOWELS = ("yae", "yeo", "wae", "ae", "ya", "eo", "ye", "wa", "oe", "yo", "wo", "we", "wi",
+              "yu", "eu", "ui", "a", "e", "o", "u", "i")
+_RR_FINALS = ("ng", "k", "n", "t", "l", "m", "p", "")
+_HUMP_SPLIT_RE = re.compile(r"(?<=[a-z])(?=[A-Z])")
+
 
 def _pronounceable(part):
     """False for alphabetic parts that do not read like a word (see the
@@ -236,6 +267,38 @@ def _pair_score(part):
             total += int(_BIGRAM_ROWS[ord(first) - 97][ord(second) - 97]) - 5
             count += 1
     return total, count
+
+
+def _rr_word(word):
+    """True when lowercase letters word is a run of RR syllables."""
+    size = len(word)
+    reach = [False] * (size + 1)
+    reach[0] = True
+    for start in range(size):
+        if not reach[start]:
+            continue
+        for initial in _RR_INITIALS:
+            if not word.startswith(initial, start):
+                continue
+            vowel_at = start + len(initial)
+            for vowel in _RR_VOWELS:
+                if not word.startswith(vowel, vowel_at):
+                    continue
+                final_at = vowel_at + len(vowel)
+                for final in _RR_FINALS:
+                    if word.startswith(final, final_at):
+                        reach[final_at + len(final)] = True
+    return reach[size]
+
+
+def _romanized(part):
+    """True when an alphabetic part reads as romanized Korean: each of its
+    CamelCase humps (JeongMinsu: Jeong, Minsu) is a run of Revised
+    Romanization syllables (fix round 3)."""
+    if not part.isalpha():
+        return False
+    humps = _HUMP_SPLIT_RE.split(part)
+    return all(hump and _rr_word(hump.lower()) for hump in humps)
 
 
 def _word_slug(value):
@@ -339,7 +402,8 @@ def _short_parts_kind(value):
     - Fix round 2: the words are cut out only when their letter pairs read
       like English on average (_pair_score mean >= WORDS_MIN_PAIR_SCORE),
       over the whole candidate and over their own segment when it holds
-      SEGMENT_MIN_PAIRS letter pairs or more. Random
+      SEGMENT_MIN_PAIRS letter pairs or more. Fix round 3: a romanized
+      Korean word (_romanized) adds no pairs to that average. Random
       letter words (a/Qwerty/Zxcvbn/..., docs/<8>-<8>-<8>) then stay in
       what is checked; natural names, which may hold a few odd words
       among ordinary ones, keep theirs out. In a segment of four or more
@@ -376,9 +440,10 @@ def _short_parts_kind(value):
                 kinds.append("cut")
             elif len(piece) >= 5 and not is_hex and not piece.isdigit() and _word_part(piece):
                 kinds.append("word")
-                score, count = _pair_score(piece)
-                seg_sum += score
-                seg_count += count
+                if not _romanized(piece):
+                    score, count = _pair_score(piece)
+                    seg_sum += score
+                    seg_count += count
             else:
                 kinds.append("keep")
         all_sum += seg_sum
@@ -468,7 +533,23 @@ def _placeholder(value):
         return True
     if len(set(stripped)) == 1:
         return True
+    if _PLACEHOLDER_WORD_RE.match(stripped):
+        return True
     return stripped.lower() in ("xxxxxx", "changeme", "example", "redacted", "none", "null")
+
+
+def _iam_name(match):
+    """True for an _ASSIGN_RE match that is an IAM action or ARN of a
+    _IAM_SERVICE_KEYS service (secretsmanager:GetSecretValue in a policy,
+    arn:aws:secretsmanager:<region>:...): the key is the bare service
+    prefix and the separator a lone ':'."""
+    if match.group("key").lower() not in _IAM_SERVICE_KEYS or match.group("sep") != ":":
+        return False
+    if match.group("q"):
+        return False
+    if _IAM_ACTION_RE.match(match.group("val")):
+        return True
+    return bool(_ARN_PREFIX_RE.search(match.string[max(0, match.start() - 16):match.start()]))
 
 
 def redact(text, allow=(), known_ids=None):
@@ -522,6 +603,8 @@ def redact(text, allow=(), known_ids=None):
         value = match.group("val")
         if allowed(value) or _placeholder(value) or REDACTED_RE.match(value):
             return match.group(0)
+        if _iam_name(match):
+            return match.group(0)
         counts["assign"] += 1
         return match.group("key") + match.group("sep") + match.group("q") + (REDACTED_FMT % "assign")
 
@@ -538,14 +621,17 @@ def redact(text, allow=(), known_ids=None):
         kind = _candidate_kind(value, anchored=anchored, source_id=in_src)
         if kind is None:
             return value
-        if _covered_by_allow(value, anchored):
+        if _covered_by_allow(value, anchored, in_src):
             return value
         counts[kind] += 1
         return REDACTED_FMT % kind
 
-    def _covered_by_allow(value, anchored):
+    def _covered_by_allow(value, anchored, source_id=False):
         """Entries of 8+ chars found inside value (a bare document id inside
-        a URL span) cover it when what is left holds no hit of its own."""
+        a URL span) cover it when what is left holds no hit of its own.
+        What is left of a known source id keeps its source-id exemption
+        (fix round 3), so an allow entry for the flagged folder part of an
+        id brings a source_id_secret source back."""
         inside = [item for item in long_allow if item in value]
         if not inside:
             return False
@@ -553,7 +639,8 @@ def redact(text, allow=(), known_ids=None):
         for item in inside:
             rest = rest.replace(item, " ")
         for piece in _CANDIDATE_RE.finditer(rest):
-            if _candidate_kind(piece.group(0), anchored=anchored) is not None:
+            if _candidate_kind(piece.group(0), anchored=anchored,
+                               source_id=source_id) is not None:
                 return False
         return True
 

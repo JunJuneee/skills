@@ -715,11 +715,13 @@ def _template_lines(name):
 
 
 def untagged_notes(text):
-    """Text directly under root '## 내 메모', before the first '### '."""
+    """Text directly under root '## 내 메모', before the first level 1-3
+    heading (common.atx_heading spellings, fix round 3)."""
     _before, notes = common.split_my_notes(text or "")
     out = []
     for line in notes.splitlines(True)[1:]:
-        if line.startswith("### ") or (line.startswith("## ") and not line.startswith("### ")):
+        heading = common.atx_heading(line)
+        if heading is not None and heading[0] <= 3:
             break
         out.append(line)
     return "".join(out)
@@ -742,10 +744,15 @@ def discover_root_notes(root, warnings):
         if stray:
             warnings.append("my_notes_untagged:%s" % name)
         _before, notes = common.split_my_notes(text)
-        if common.my_notes_ambiguous(notes):
+        ambiguity = common.my_notes_ambiguity(notes)
+        if ambiguity is not None:
             # Fix round 2: no domain's part is staged; the source already
             # recorded stays as it was (notes are not a deletable kind).
-            warnings.append("my_notes_unbalanced_fence:%s" % name)
+            # Fix round 3: a domain-named heading the parser cannot place
+            # ('#### work', '> ### work', setext) holds them back the same way.
+            code = ("my_notes_unbalanced_fence" if ambiguity == "fence"
+                    else "my_notes_misplaced_heading")
+            warnings.append("%s:%s" % (code, name))
             continue
         for domain in common.DOMAINS:
             part = common.my_notes_subsection(notes, domain)

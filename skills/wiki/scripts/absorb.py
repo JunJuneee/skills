@@ -19,7 +19,9 @@ One run, under the absorb lock (D6):
      The claude binary is probed with --help first; a missing flag fails
      the run (claude_flags_missing) instead of running with weaker
      isolation. Then verify (verify.py). A failed batch is reset in the
-     worktree only; its sources are offered again next run.
+     worktree only; its sources are offered again next run. Before the
+     reset, the files it changed are kept, redacted, under
+     .state/failed/<run_id>/<batch_id>/ with failure.json (last 5 runs).
   4. deferral (D7, per batch): a file whose working-tree bytes in main
      differ from base_sha (Obsidian edits are uncommitted) keeps main's
      version; every batch touching it is deferred whole.
@@ -55,6 +57,7 @@ if SCRIPTS_DIR not in sys.path:
 
 import common  # noqa: E402
 import prepare  # noqa: E402
+import redact  # noqa: E402
 import verify  # noqa: E402
 
 SKILL_DIR = os.path.dirname(SCRIPTS_DIR)
@@ -68,6 +71,10 @@ RULES_FILENAME = "wiki-prefs.md"
 # wrote there} (fix round 2: the rules file is trusted by provenance).
 RULES_RECORD = "rules-written.json"
 RUNNING_FILE = "absorb-running.json"
+# .state/<this>/<run_id>/<batch_id>/: a failed batch's draft, redacted (fix
+# round 3, I-3: a failure used to leave nothing to diagnose).
+FAILED_DIR = "failed"
+FAILED_KEEP_RUNS = 5
 
 LLM_TOOLS = "Read,Edit,Write,Glob,Grep"
 REQUIRED_FLAGS = (
@@ -689,6 +696,120 @@ def _new_outcome(batch):
     return outcome
 
 
+def failed_dir(root):
+    return os.path.join(common.state_dir(root), FAILED_DIR)
+
+
+def _retained_name(rel, allow):
+    """rel as a path under the failed store: its own name when it holds no
+    secret-shaped string, else a hashed name (the LLM chose the name)."""
+    parts = [part for part in rel.split("/") if part]
+    if (parts and all(part not in (".", "..") for part in parts)
+            and not redact.scan(" %s " % rel, allow)):
+        return "/".join(parts)
+    digest = hashlib.sha256(rel.encode("utf-8", "replace")).hexdigest()[:12]
+    return "_renamed/%s%s" % (digest, ".md" if rel.endswith(".md") else "")
+
+
+def _prune_failed(root, keep=FAILED_KEEP_RUNS):
+    """Keep the newest `keep` run folders of the failed store (run ids sort
+    by time)."""
+    base = failed_dir(root)
+    try:
+        runs = sorted(name for name in os.listdir(base)
+                      if os.path.isdir(os.path.join(base, name)) and not name.startswith("."))
+    except OSError:
+        return
+    for name in runs[:-keep] if keep > 0 else runs:
+        shutil.rmtree(os.path.join(base, name), ignore_errors=True)
+
+
+def _private_parents(dest, target):
+    """Create target's missing parent folders below dest, each 0700."""
+    parent = os.path.dirname(target)
+    chain = []
+    while parent != dest and not os.path.isdir(parent):
+        chain.append(parent)
+        parent = os.path.dirname(parent)
+    for folder in reversed(chain):
+        common.ensure_private_dir(folder)
+
+
+def retain_failed_batch(ctx, batch, outcome, pre, result=None):
+    """Keep a failed batch's draft for diagnosis (fix round 3, I-3): every
+    file the LLM step changed in the worktree since pre, redacted with the
+    allow list and known ids verify scans with, under
+    .state/failed/<run_id>/<batch_id>/ (folders 0700, files 0600; .state/
+    is gitignored), plus failure.json (reason, problems, source ids,
+    changed files, the LLM's structured output; all redacted). A secret
+    hit shows as [REDACTED:<kind>] at its place. A file name that is
+    itself secret-shaped is stored under a hash. The newest
+    FAILED_KEEP_RUNS runs are kept. Returns the folder, or None when it
+    could not be written; never raises, so the batch's failure reason
+    stays its own."""
+    root, wt = ctx["root"], ctx["wt"]
+    try:
+        allow = verify.scan_allow(wt, ctx["domains"])
+        known = verify.known_source_ids((ctx.get("working_sources") or {}).get("sources"),
+                                        list(ctx.get("run_sources") or [])
+                                        + list(batch["sources"]))
+        base = failed_dir(root)
+        run_dir = os.path.join(base, str(ctx.get("run_id") or "run"))
+        dest = os.path.join(run_dir, str(batch["batch_id"]))
+        for path in (common.state_dir(root), base, run_dir):
+            common.ensure_private_dir(path)
+        if os.path.lexists(dest):
+            shutil.rmtree(dest, ignore_errors=True)
+        common.ensure_private_dir(dest)
+        files = []
+        for status, rel in verify.changed_files(wt, pre):
+            item = collections.OrderedDict()
+            item["status"] = status
+            item["path"] = redact.redact(rel, allow, known).text
+            item["kept"] = None
+            full = os.path.join(wt, rel)
+            if status == "D" or not os.path.lexists(full):
+                pass
+            elif os.path.islink(full) or not os.path.isfile(full):
+                item["note"] = "not_regular_file"
+            else:
+                try:
+                    text = verify.read_text(full)
+                except (IOError, OSError, UnicodeDecodeError, ValueError):
+                    item["note"] = "unreadable"
+                else:
+                    name = _retained_name(rel, allow)
+                    target = os.path.join(dest, name)
+                    _private_parents(dest, target)
+                    common.atomic_write_text(target, redact.redact(text, allow, known).text,
+                                             mode=0o600)
+                    item["kept"] = name
+            files.append(item)
+        info = collections.OrderedDict()
+        info["run_id"] = ctx.get("run_id")
+        info["batch_id"] = batch["batch_id"]
+        info["domain"] = outcome.get("domain")
+        info["reason"] = outcome.get("reason")
+        # A problem is '<code>:<detail>'; only the detail (page path,
+        # source id) is redacted, so 'secret_found:' itself stays readable.
+        info["problems"] = []
+        for problem in outcome.get("problems") or []:
+            code, sep, detail = str(problem).partition(":")
+            info["problems"].append(code + sep + redact.redact(detail, allow, known).text)
+        info["sources"] = [source.get("id") for source in batch["sources"]]
+        info["files"] = files
+        structured = (result or {}).get("structured")
+        if structured is not None:
+            info["structured_output"] = json.loads(redact.redact(
+                json.dumps(structured, ensure_ascii=False), allow, known).text)
+        common.atomic_write_text(os.path.join(dest, "failure.json"),
+                                 common.dumps_json(info), mode=0o600)
+        _prune_failed(root)
+        return dest
+    except Exception:  # noqa: BLE001 - keeping a draft must not mask the failure
+        return None
+
+
 def run_batch(ctx, batch, record):
     """LLM step + verify + Python post-processing for one batch. On any
     failure the worktree goes back to the batch's starting commit."""
@@ -703,6 +824,7 @@ def run_batch(ctx, batch, record):
     if not os.path.isdir(cwd):
         os.makedirs(cwd)
     working = ctx["working_sources"]
+    result = None
     try:
         if ctx.get("runner_error") is not None:
             raise ctx["runner_error"]
@@ -777,6 +899,8 @@ def run_batch(ctx, batch, record):
         outcome["ok"] = False
         outcome["reason"] = exc.reason
         outcome["problems"] = list(getattr(exc, "problems", []) or [str(exc)])[:20]
+        if retain_failed_batch(ctx, batch, outcome, pre, result):
+            outcome["warnings"].append("failed_draft_kept")
         reset_worktree(wt, pre)
     except (ValueError, OSError) as exc:
         # An undecodable or unreadable page (e.g. a CP949 export) fails this
@@ -784,6 +908,8 @@ def run_batch(ctx, batch, record):
         outcome["ok"] = False
         outcome["reason"] = "page_unreadable"
         outcome["problems"] = ["page_unreadable:%s" % type(exc).__name__]
+        if retain_failed_batch(ctx, batch, outcome, pre, result):
+            outcome["warnings"].append("failed_draft_kept")
         reset_worktree(wt, pre)
     return outcome
 

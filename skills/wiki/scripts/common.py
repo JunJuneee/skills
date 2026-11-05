@@ -595,6 +595,36 @@ def fence_step(fence, line):
     return fence, False
 
 
+# CommonMark ATX heading (fix round 3): up to three leading spaces, one to
+# six '#', then a space or tab (or the end of the line), the text, and an
+# optional closing run of '#' after a space or tab. Obsidian renders the
+# same lines as headings, so the notes parsers read them the same way.
+_ATX_RE = re.compile(r"^ {0,3}(#{1,6})(?:[ \t]+(.*?))?[ \t]*$")
+_ATX_CLOSE_RE = re.compile(r"(?:^|[ \t]+)#+$")
+# Block quote and list item markers in front of a line ("> ", "- ", "1. ").
+_CONTAINER_RE = re.compile(r"^(?:[ \t]*(?:>|[-+*](?=[ \t])|\d{1,9}[.)](?=[ \t])))+[ \t]*")
+# A setext underline: the line above becomes a level 1 (=) or 2 (-) heading.
+_SETEXT_RE = re.compile(r"^ {0,3}(?:=+|-+)[ \t]*$")
+
+
+def atx_heading(line):
+    """(level, text) when line is a CommonMark ATX heading, else None.
+    '###   work  ##' and '  ### work' are (3, 'work'); '###work',
+    '    ### work' (indented code) and '#tag' are not headings."""
+    match = _ATX_RE.match(line.rstrip("\r\n"))
+    if not match:
+        return None
+    text = _ATX_CLOSE_RE.sub("", (match.group(2) or "").rstrip(" \t"))
+    return len(match.group(1)), text.strip(" \t")
+
+
+def is_my_notes_heading(line):
+    """True for a '## 내 메모' heading line in any rendering spelling
+    ('  ## 내 메모', '##  내 메모 ##'; fix round 3)."""
+    heading = atx_heading(line)
+    return heading is not None and heading[0] == 2 and heading[1] == MY_NOTES_HEADING[3:]
+
+
 def format_src(source_id, date):
     """Section provenance marker: <!-- src: <id> @<date> -->."""
     if not is_valid_source_id(source_id):
@@ -614,35 +644,75 @@ def split_my_notes(body, heading=MY_NOTES_HEADING):
     fence = None
     for line in body.splitlines(True):
         fence, is_fence = fence_step(fence, line)
-        if not is_fence and fence is None and line.rstrip("\r\n").rstrip() == heading:
+        if not is_fence and fence is None and (
+                line.rstrip("\r\n").rstrip() == heading
+                or (heading == MY_NOTES_HEADING and is_my_notes_heading(line))):
             return body[:offset], body[offset:]
         offset += len(line)
     return body, ""
 
 
-def _structural_heading(stripped):
-    """'## <x>' or '### <domain>': a line that ends or starts a root notes
-    subsection when it is outside code."""
-    if stripped.startswith("## ") and not stripped.startswith("### "):
-        return True
-    return stripped in ["### " + domain for domain in DOMAINS]
+def _structural_heading(line):
+    """A level 1-2 heading or '### <domain>' (atx_heading spellings): a
+    line that ends or starts a root notes subsection outside code."""
+    heading = atx_heading(line)
+    if heading is None:
+        return False
+    return heading[0] <= 2 or (heading[0] == 3 and heading[1] in DOMAINS)
+
+
+def _misplaced_domain_heading(line, previous):
+    """True when line renders as a heading named after a domain but is not
+    a top-level '### <domain>' (fix round 3): another level ('#### work'),
+    inside a block quote or list item ('> ### work', '- ### work'),
+    indented, or a setext heading ('work' over '---'). The parser would
+    keep its text in the subsection above, while a reader sees it under
+    that domain's name."""
+    heading = atx_heading(line)
+    if heading is not None:
+        return heading[1] in DOMAINS and heading[0] != 3
+    for loose in (_CONTAINER_RE.sub("", line), line.lstrip(" \t")):
+        heading = atx_heading(loose)
+        if heading is not None and heading[1] in DOMAINS:
+            return True
+    if previous is not None and _SETEXT_RE.match(line.rstrip("\r\n")):
+        text = _CONTAINER_RE.sub("", previous.rstrip("\r\n")).strip(" \t")
+        return text in DOMAINS
+    return False
 
 
 def my_notes_ambiguous(notes):
-    """True when the subsections of a '## 내 메모' tail cannot be told apart
-    safely (fix round 2): its fences do not balance, or a '## ' or
-    '### <domain>' line sits inside a fence. Either way a fence opened in
-    one domain's subsection may run into the next one (an unclosed ``` in
-    '### personal' swallowing '### work'), or a '### <domain>' line in code
-    may really be a heading after a fence left open: no reading is safe."""
+    """True when my_notes_ambiguity(notes) names a reason."""
+    return my_notes_ambiguity(notes) is not None
+
+
+def my_notes_ambiguity(notes):
+    """Why the subsections of a '## 내 메모' tail cannot be told apart
+    safely, or None. "fence" (fix round 2): its fences do not balance, or a level 1-2 or
+    '### <domain>' heading line sits inside a fence. Either way a fence
+    opened in one domain's subsection may run into the next one (an
+    unclosed ``` in '### personal' swallowing '### work'), or a
+    '### <domain>' line in code may really be a heading after a fence left
+    open: no reading is safe. Fix round 3: also when a heading named after
+    a domain sits where the parser does not take it as one
+    (_misplaced_domain_heading): "heading"."""
     fence = None
+    previous = None
+    misplaced = False
     for line in notes.splitlines(True):
         before = fence
         fence, is_fence = fence_step(fence, line)
-        if before is not None and not is_fence and _structural_heading(
-                line.rstrip("\r\n").rstrip()):
-            return True
-    return fence is not None
+        if before is not None or is_fence:
+            if before is not None and not is_fence and _structural_heading(line):
+                return "fence"
+            previous = None
+            continue
+        if _misplaced_domain_heading(line, previous):
+            misplaced = True
+        previous = line if line.strip() else None
+    if fence is not None:
+        return "fence"
+    return "heading" if misplaced else None
 
 
 def my_notes_subsection(notes, domain):
@@ -657,9 +727,9 @@ def my_notes_subsection(notes, domain):
     """
     if my_notes_ambiguous(notes):
         return ""
-    wanted = "### " + domain
     out = []
     inside = False
+    top_seen = False
     fence = None
     for line in notes.splitlines(True):
         before = fence
@@ -668,13 +738,19 @@ def my_notes_subsection(notes, domain):
             if inside:
                 out.append(line)
             continue
-        stripped = line.rstrip("\r\n").rstrip()
-        if stripped.startswith("## ") and not stripped.startswith("### "):
-            if inside:
+        # Fix round 3: headings are read as CommonMark/Obsidian render them
+        # (atx_heading), so '  ### work', '###  work' and '### work ###'
+        # start the work subsection instead of staying in the one above.
+        heading = atx_heading(line)
+        if heading is not None and heading[0] <= 2:
+            # The first one is '## 내 메모' itself; any later level 1-2
+            # heading ends the notes as rendered.
+            if inside or top_seen:
                 break
+            top_seen = True
             continue
-        if stripped.startswith("### "):
-            inside = stripped == wanted
+        if heading is not None and heading[0] == 3:
+            inside = heading[1] == domain
             continue
         if inside:
             out.append(line)
@@ -1207,6 +1283,15 @@ PLAN_DEVIATIONS = (
     "(root_untracked_notes:<n>), never absorbed",
     "scan_existing_hits:the pre-merge whole-tree scan blocks only on files new or changed since "
     "base_sha; unchanged hits are counted (secret_found_existing:<n>)",
+    "redact_romanized_words:romanized-Korean words (RR syllables, each CamelCase hump) are "
+    "neutral in the letter-pair average, so such file paths are not redacted",
+    "notes_heading_rendering:root 내 메모 headings parsed by CommonMark ATX rules; a "
+    "domain-named heading the parser cannot place holds every domain's notes back "
+    "(my_notes_misplaced_heading:<name>)",
+    "assign_false_positives:assignment values end at a backtick; REPLACE_ME-style placeholders, "
+    "secretsmanager:<Action> and Secrets Manager ARNs are not assignments",
+    "failed_draft_retention:a failed batch's changed files kept redacted in "
+    ".state/failed/<run_id>/<batch>/ (0700/0600, last 5 runs)",
 )
 
 
