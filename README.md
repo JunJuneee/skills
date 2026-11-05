@@ -34,6 +34,14 @@ Claude·Codex 공용 본문은 `skills/agent-workflow/SKILL.md` 한곳에서 관
 
 같은 작업의 후속 PR 리뷰에도 기존 수정·검증·재리뷰 계약을 이어받습니다. 유효한 지적이 오면 실제 수정 작업으로 연결하며, 비동기 응답을 기다리는 턴 종료와 사용자 결정 대기를 구분합니다. PR-only와 병합 승인, 명시적 리뷰 전용·사용자 hold는 각각 유지합니다. 상세 기준은 [리뷰 반복과 재개](skills/linear-traycer-workflow/references/review-loop.md)를 따릅니다.
 
+## 개인 맥락 위키
+
+[`wiki`](skills/wiki/SKILL.md)는 `~/wiki`(로컬 git, 원격 없음)에 `work/`·`personal/` 페이지를 두고, 내가 쓴 프롬프트·memory·handoff·inbox 노트를 격리된 absorb가 하루 한 번 페이지로 반영하게 합니다. 세션은 레포의 git remote로 도메인이 정해질 때만 그 도메인 맥락을 받고, 판정이 안 되면 아무것도 받지 않습니다. 도메인과 설정은 `domains.json`·`settings.json`(JSON, 비밀값 없음)에 둡니다.
+
+> /wiki init
+
+명령은 `init`(폴더·규약·로컬 git 생성), `absorb`(격리된 반영과 Slack 한 줄 알림), `note`, `query`, `status`, `schedule`(launchd 자동 실행, 직접 설치할 때만)입니다. 테스트는 `python3 -m unittest discover -s skills/wiki/tests`로 돌립니다(Python 3.9 표준 라이브러리만 사용).
+
 ## 🎯 핵심 기능
 
 | 기능 | 트리거 | 결과 |
