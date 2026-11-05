@@ -37,6 +37,8 @@ ELEVENLABS_VOICE_ID="${ELEVENLABS_VOICE_ID:-8yL2rVx40vjDeu5pTbg6}"
 # Headless Claude Code. bypassPermissions is what makes it unattended: a scheduled run
 # has nobody to answer a tool prompt, and the job would hang until launchd killed it.
 AGENT_CMD="${AGENT_CMD:-claude -p --permission-mode bypassPermissions}"
+# 무인 실행은 개인 위키 훅(skills/wiki)의 맥락 주입을 받지 않는다(위키 D18).
+export LLM_WIKI_HOOK=0
 PRIVACY="${YOUTUBE_PRIVACY:-public}"
 YOUTUBE_TAGS="${YOUTUBE_TAGS:-마켓노트,증시마감,주식투자}"
 YOUTUBE_SCRIPTS="${YOUTUBE_SCRIPTS:-$SKILLS_ROOT/youtube-video-publisher/scripts}"
