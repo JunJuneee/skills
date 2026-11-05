@@ -1,0 +1,38 @@
+{
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear|compact|resume",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -d \"${WIKI_ROOT:-$HOME/wiki}\" ] || exit 0; [ \"${LLM_WIKI_HOOK:-1}\" = 0 ] && exit 0; /usr/bin/python3 \"${CLAUDE_PLUGIN_ROOT}/skills/wiki/scripts/session_context.py\" --event SessionStart 2>/dev/null || exit 0",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "SubagentStart": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -d \"${WIKI_ROOT:-$HOME/wiki}\" ] || exit 0; [ \"${LLM_WIKI_HOOK:-1}\" = 0 ] && exit 0; /usr/bin/python3 \"${CLAUDE_PLUGIN_ROOT}/skills/wiki/scripts/session_context.py\" --event SubagentStart 2>/dev/null || exit 0",
+            "timeout": 5
+          }
+        ]
+      }
+    ],
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "[ -d \"${WIKI_ROOT:-$HOME/wiki}\" ] || exit 0; [ \"${LLM_WIKI_HOOK:-1}\" = 0 ] && exit 0; /usr/bin/python3 \"${CLAUDE_PLUGIN_ROOT}/skills/wiki/scripts/prompt_nudge.py\" --event UserPromptSubmit 2>/dev/null || exit 0",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

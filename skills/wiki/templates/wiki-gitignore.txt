@@ -1,0 +1,15 @@
+# wiki: absorb worktree, state, pinned scripts, inbox (never committed)
+/.absorb-wt/
+/.state/
+/.bin/
+/inbox/
+# absorb draft fragments (verify assembles and deletes them)
+_drafts/
+# Obsidian per-device state and plugin data
+.obsidian/workspace.json
+.obsidian/workspace-mobile.json
+.obsidian/plugins/*/data.json
+.trash/
+.DS_Store
+# local notify settings (channel ID, token_cmd); never committed
+/notify.json

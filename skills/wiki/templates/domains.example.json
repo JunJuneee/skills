@@ -1,0 +1,13 @@
+{
+  "_comment": "Replace every <placeholder>. owners maps a git remote owner (org or user, case-insensitive) to work or personal.",
+  "owners": {
+    "<work-github-org>": "work",
+    "<your-github-user>": "personal"
+  },
+  "work_terms": ["<company-name>", "<company-project-name>"],
+  "overrides": {
+    "mem:<project-folder>/<file>.md": "work"
+  },
+  "redact_allow": ["<public-example-key>"],
+  "obsidian_plugins_allow": []
+}

@@ -1,0 +1,4 @@
+interface:
+  display_name: "개인 맥락 위키"
+  short_description: "~/wiki를 초기화하고 격리된 absorb로 work·personal 페이지를 갱신"
+  default_prompt: "Use $wiki to run the requested wiki command (init, absorb, note --domain work|personal, query, status, schedule) through scripts/wiki.py. Never edit wiki pages with this session's own tools; absorb runs as an isolated subprocess."
