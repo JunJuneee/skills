@@ -268,7 +268,7 @@ class PromptTest(PrepareCase):
             {"display": "%s 얘기 개인 레포에서" % TERM, "pastedContents": {},
              "timestamp": noon("2026-11-05"), "project": mine, "sessionId": "s"},
             {"display": "홈 폴더 프롬프트", "pastedContents": {}, "timestamp": noon("2026-11-05"),
-             "project": self.home, "sessionId": "s"},
+             "project": self.home, "sessionId": "home"},
             {"display": "오래된 프롬프트", "pastedContents": {}, "timestamp": noon("2026-09-01"),
              "project": work, "sessionId": "s"},
         ])

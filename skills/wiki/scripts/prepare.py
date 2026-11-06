@@ -58,6 +58,7 @@ SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
+import classify  # noqa: E402
 import common  # noqa: E402
 import redact  # noqa: E402
 
@@ -72,9 +73,11 @@ KIND_INBOX = "inbox"
 KIND_MANUAL = "manual"
 KIND_NOTES = "notes"  # the '### <domain>' part of root now.md/about-me.md '## 내 메모' (D16)
 
-# Only file-backed sources are withdrawn when they disappear. Prompt digests
-# are not: history.jsonl rotates and the Traycer DB has vanished before, and
-# missing data is not a retraction. Inbox files are consumed, not deleted.
+# Only file-backed sources are withdrawn when they disappear. Prompt digests are
+# not: history.jsonl rotates and the Traycer DB has vanished before, and missing
+# data is not a retraction. A digest is withdrawn only when one of its prompts is
+# seen right now in another bucket (see moved_prompts). Inbox files are consumed,
+# not deleted.
 DELETABLE_KINDS = (KIND_MEMORY, KIND_HANDOFF, KIND_DESIGN)
 
 STATUS_ACTIVE = "active"
@@ -764,7 +767,7 @@ def discover_root_notes(root, warnings):
     return items
 
 
-def _prompt_record(text, millis, label, cwd=None, epic=None):
+def _prompt_record(text, millis, label, cwd=None, epic=None, session=None):
     try:
         seconds = float(millis) / 1000.0
     except (TypeError, ValueError):
@@ -778,7 +781,8 @@ def _prompt_record(text, millis, label, cwd=None, epic=None):
         text = text[:PROMPT_MAX_CHARS] + "\n…(잘림)"
     moment = datetime.datetime.fromtimestamp(seconds)
     return {"text": text, "ts": seconds, "date": moment.strftime("%Y-%m-%d"),
-            "time": moment.strftime("%H:%M"), "label": label, "cwd": cwd, "epic": epic}
+            "time": moment.strftime("%H:%M"), "label": label, "cwd": cwd, "epic": epic,
+            "session": session}
 
 
 def read_history(path, since_date, warnings):
@@ -805,7 +809,9 @@ def read_history(path, since_date, warnings):
                 continue
             project = row.get("project") if isinstance(row.get("project"), str) else None
             label = os.path.basename(project.rstrip("/")) if project else "?"
-            record = _prompt_record(row.get("display"), row.get("timestamp"), label, cwd=project)
+            session = row.get("sessionId") if isinstance(row.get("sessionId"), str) else None
+            record = _prompt_record(row.get("display"), row.get("timestamp"), label, cwd=project,
+                                    session=session)
             if record and record["date"] >= since_date:
                 records.append(record)
     return records
@@ -831,12 +837,12 @@ def read_traycer(path, since_date, warnings):
         since = datetime.datetime.strptime(since_date, "%Y-%m-%d")
         since_ms = int(since.timestamp() * 1000)
         rows = conn.execute(
-            "SELECT d.text, d.created_at, c.epic_id FROM search_doc d "
+            "SELECT d.text, d.created_at, c.epic_id, c.chat_key FROM search_doc d "
             "JOIN search_chat c ON c.chat_key = d.chat_key "
             "WHERE d.tier = 'user' AND d.inter_agent = 0 AND c.lifecycle_state != 'deleted' "
             "AND d.created_at >= ? ORDER BY d.created_at, d.id", (since_ms,))
-        for text, created_at, epic_id in rows:
-            record = _prompt_record(text, created_at, "traycer", epic=epic_id)
+        for text, created_at, epic_id, chat_key in rows:
+            record = _prompt_record(text, created_at, "traycer", epic=epic_id, session=chat_key)
             if record:
                 records.append(record)
     except sqlite3.Error:
@@ -856,18 +862,13 @@ def render_digest(date, domain, records):
     return "\n".join(lines)
 
 
-def build_prompt_items(records, resolver, epics):
-    """Daily digests per domain (D4). Each prompt is resolved by its own
-    cwd (history: project; Traycer: the epic's single workspace). Personal
-    prompts hitting work_terms are quarantined one by one; unresolved and
-    quarantined prompts are tracked per day only for counting."""
-    buckets = collections.OrderedDict()
-    seen = set()
+def resolve_prompts(records, resolver, epics, classes=None, classifier=None):
+    """Entries {record, domain, sessions, via} for all prompts, deduped. A
+    prompt seen twice counts as work if any copy does. A prompt its folder
+    says nothing about goes to work on a work_terms hit, else classify.py
+    decides (via says how)."""
+    merged = collections.OrderedDict()
     for record in sorted(records, key=lambda r: (r["ts"], r["label"], r["text"])):
-        key = (record["date"], record["time"], record["text"])
-        if key in seen:
-            continue
-        seen.add(key)
         if record["epic"] is not None:
             domain, cwd = epics.domain(record["epic"])
             if cwd:
@@ -876,6 +877,36 @@ def build_prompt_items(records, resolver, epics):
             domain = resolver.cwd_domain(record["cwd"])
             if domain is None and record["cwd"] and resolver.terms.hits(record["cwd"]):
                 domain = "work"
+            if record["cwd"] and resolver.home and (
+                    os.path.normpath(record["cwd"]) == os.path.normpath(resolver.home)):
+                # The basename of home is the account name, which may be a
+                # work term; in a digest it would quarantine the whole day.
+                record = dict(record, label="~")
+        if domain is None and resolver.terms.hits(record["text"]):
+            domain = "work"
+        key = (record["date"], record["time"], record["text"])
+        sessions = {record["session"]} if record.get("session") else set()
+        entry = merged.get(key)
+        if entry is None:
+            merged[key] = {"record": record, "domain": domain, "sessions": sessions,
+                           "via": "folder" if domain else None}
+        else:
+            entry["sessions"] |= sessions
+            if domain == "work" or entry["domain"] is None:
+                entry["domain"] = domain or entry["domain"]
+                entry["via"] = "folder" if entry["domain"] else None
+    entries = list(merged.values())
+    classify.resolve_sessions(entries, classes or {}, classifier)
+    return entries
+
+
+def build_prompt_items(records, resolver, epics, classes=None, classifier=None):
+    """Daily digests per domain (D4). Personal prompts hitting work_terms are
+    quarantined one by one; unresolved and quarantined prompts are tracked
+    per day only for counting."""
+    buckets = collections.OrderedDict()
+    for entry in resolve_prompts(records, resolver, epics, classes, classifier):
+        record, domain = entry["record"], entry["domain"]
         if domain == "personal" and resolver.terms.hits(record["text"]):
             bucket = STATUS_QUARANTINED
         elif domain in common.DOMAINS:
@@ -889,13 +920,16 @@ def build_prompt_items(records, resolver, epics):
             text = render_digest(date, bucket, group)
             items.append(_item(make_id(KIND_PROMPTS, "%s/%s" % (bucket, date)), KIND_PROMPTS,
                                text, date, bucket, "prompt_cwd",
-                               "프롬프트 %s (%d)" % (date, len(group)), prompt_count=len(group)))
+                               "프롬프트 %s (%d)" % (date, len(group)), prompt_count=len(group),
+                               keys=sorted(classify.prompt_key(r) for r in group),
+                               key_times=dict((classify.prompt_key(r), r["time"]) for r in group)))
         else:
             text = "\n".join("%s %s %s" % (r["time"], r["label"], r["text"]) for r in group)
             label = "quarantine" if bucket == STATUS_QUARANTINED else "unresolved"
             items.append(_item(make_id(KIND_PROMPTS, "%s/%s" % (label, date)), KIND_PROMPTS,
                                text, date, None, None, "프롬프트 %s" % date,
-                               forced_status=bucket, prompt_count=len(group)))
+                               forced_status=bucket, prompt_count=len(group),
+                               keys=sorted(classify.prompt_key(r) for r in group)))
     return items
 
 
@@ -1177,9 +1211,18 @@ def _resolve_item(item, paths, resolver):
     return None, None
 
 
+def moved_prompts(entry, item, observed):
+    """Times of prompts this digest held that are now seen in another bucket.
+    A prompt that is simply gone proves nothing, so it does not count."""
+    old = (entry or {}).get("keys") or {}
+    here = set((item or {}).get("keys") or ())
+    return sorted(time for key, time in old.items() if key not in here and key in observed)
+
+
 def plan_sources(root, items, scanned_kinds, sources, paths, resolver, domains):
     plan = Plan()
     entries = sources["sources"]
+    observed = set(key for item in items for key in item.get("keys") or ())
     allow = domains.get("redact_allow", [])
     # Ids prepare itself made from file and folder names (sources.json and
     # this run's items): only these keep the src-comment exemption when
@@ -1254,6 +1297,9 @@ def plan_sources(root, items, scanned_kinds, sources, paths, resolver, domains):
                     diff_text = "".join(difflib.unified_diff(
                         old.splitlines(True), result.text.splitlines(True),
                         fromfile="before", tofile="after", n=3))
+                    moved = moved_prompts(entry, item, observed)
+                    if moved:
+                        diff_text = "옮겨진 프롬프트 시각: %s\n%s" % (", ".join(moved), diff_text)
             if not same:
                 plan.ops.append({"id": source_id, "op": op, "domain": domain, "item": item,
                                  "text": result.text, "hash": digest, "diff": diff_text,
@@ -1283,6 +1329,10 @@ def plan_sources(root, items, scanned_kinds, sources, paths, resolver, domains):
         withdraw = set(entry.get("withdraw") or [])
         if status == STATUS_ACTIVE and kind in DELETABLE_KINDS and kind in scanned_kinds:
             vanished[kind].append(source_id)
+        if (status == STATUS_ACTIVE and kind == KIND_PROMPTS
+                and moved_prompts(entry, None, observed)):
+            plan.ops.append({"id": source_id, "op": "deleted", "domain": entry["domain"],
+                             "item": None, "entry": entry, "date": entry.get("date")})
         for old_domain in sorted(withdraw):
             plan.ops.append({"id": source_id, "op": "deleted", "domain": old_domain, "item": None,
                              "entry": entry, "date": entry.get("date")})
@@ -1298,12 +1348,44 @@ def plan_sources(root, items, scanned_kinds, sources, paths, resolver, domains):
     return plan
 
 
-def gather(root, paths, resolver, domains, settings, now, warnings):
-    """All discovered items (except manual) and the kinds that were scanned."""
+def prompt_ask(root, prompt_classifier, domains, warnings, since_date):
+    """The classifier callback resolve_prompts takes, or None."""
+    if prompt_classifier is None:
+        return None
+    classes = classify.load_classes(root)
+
+    def ask(pending):
+        return prompt_classifier(root, pending, classes, domains, warnings, since_date)
+    return ask
+
+
+def prompt_window(settings, now):
     prompt_days = settings.get("prompt_days", DEFAULT_PROMPT_DAYS)
     if isinstance(prompt_days, bool) or not isinstance(prompt_days, int) or prompt_days < 1:
         raise common.ConfigError("settings_invalid", "settings.json: prompt_days must be >= 1")
-    since_date = (now - datetime.timedelta(days=prompt_days - 1)).strftime("%Y-%m-%d")
+    return (now - datetime.timedelta(days=prompt_days - 1)).strftime("%Y-%m-%d")
+
+
+def prompt_entries(root, environ=None, paths=None, now=None, prompt_classifier=None):
+    """Entries for `wiki prompts`: the same resolution absorb uses."""
+    environ = os.environ if environ is None else environ
+    now = now or datetime.datetime.now()
+    paths = paths or SourcePaths.from_environ(environ)
+    domains = common.load_domains(root)
+    since_date = prompt_window(common.load_settings(root), now)
+    resolver = Resolver(domains, home=environ.get("HOME") or os.path.expanduser("~"))
+    warnings = []
+    epics = TraycerEpics(paths.traycer_epics_db, resolver, warnings)
+    records = read_history(paths.history_path, since_date, warnings)
+    records += read_traycer(paths.traycer_db, since_date, warnings)
+    entries = resolve_prompts(records, resolver, epics, classify.load_classes(root),
+                              prompt_ask(root, prompt_classifier, domains, warnings, since_date))
+    return entries, since_date, warnings
+
+
+def gather(root, paths, resolver, domains, settings, now, warnings, prompt_classifier=None):
+    """All discovered items (except manual) and the kinds that were scanned."""
+    since_date = prompt_window(settings, now)
     items = []
     scanned = set()
     mem, ok = discover_memory(paths, resolver)
@@ -1320,7 +1402,8 @@ def gather(root, paths, resolver, domains, settings, now, warnings):
     epics = TraycerEpics(paths.traycer_epics_db, resolver, warnings)
     records = read_history(paths.history_path, since_date, warnings)
     records += read_traycer(paths.traycer_db, since_date, warnings)
-    items += build_prompt_items(records, resolver, epics)
+    items += build_prompt_items(records, resolver, epics, classify.load_classes(root),
+                                prompt_ask(root, prompt_classifier, domains, warnings, since_date))
     if resolver.remote_failures:
         warnings.append("remote_lookup_failed:%d" % resolver.remote_failures)
     return items, scanned
@@ -1453,6 +1536,8 @@ def write_staging(root, plan, max_sources, resolver, domains):
                     rec["hash"] = op["hash"]
                     rec["title"] = item.get("title")
                     rec["staged"] = redacted_rel
+                    if item.get("key_times"):
+                        rec["keys"] = item["key_times"]
                     if item.get("origin"):
                         rec["origin"] = item["origin"]
                         rec["origin_hash"] = item["origin_hash"]
@@ -1503,14 +1588,15 @@ def _summary(plan, batches):
     return summary
 
 
-def prepare(root, environ=None, paths=None, now=None, locked=False, fs_root="/", remote_fn=None):
+def prepare(root, environ=None, paths=None, now=None, locked=False, fs_root="/", remote_fn=None,
+            prompt_classifier=None):
     """Run the prepare step. Returns a summary dict (also stored in
     prepare.json). Callers that already hold the absorb lock pass
     locked=True; a second flock on the same file in one process fails."""
     environ = os.environ if environ is None else environ
     if not locked:
         with common.wiki_lock(root):
-            return prepare(root, environ, paths, now, True, fs_root, remote_fn)
+            return prepare(root, environ, paths, now, True, fs_root, remote_fn, prompt_classifier)
     now = now or datetime.datetime.now()
     paths = paths or SourcePaths.from_environ(environ)
     if not common.is_initialized(root):
@@ -1537,7 +1623,8 @@ def prepare(root, environ=None, paths=None, now=None, locked=False, fs_root="/",
         # Count only: the path itself is the leak (D5).
         warnings.append("personal_path_term:%d" % named)
 
-    items, scanned = gather(root, paths, resolver, domains, settings, now, warnings)
+    items, scanned = gather(root, paths, resolver, domains, settings, now, warnings,
+                            prompt_classifier)
     items += manual_items(root, sources, base_sha, resolver)
     plan = plan_sources(root, items, scanned, sources, paths, resolver, domains)
     plan.warnings += warnings
@@ -1663,6 +1750,10 @@ def commit_batch(root, batch_id, run_id=None):
         new["title"] = rec.get("title")
         new["snapshot"] = snap_rel
         new["updated"] = pending.get("run_id")
+        if rec.get("keys"):
+            # Old keys stay: a page may still rest on a prompt that rotated
+            # out, and that prompt can come back in another domain.
+            new["keys"] = dict((entry or {}).get("keys") or {}, **rec["keys"])
         if entry:
             for extra in entry:
                 if extra not in new and extra not in ("withdraw",):

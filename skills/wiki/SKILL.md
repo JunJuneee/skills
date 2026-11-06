@@ -22,7 +22,7 @@ python3 "$SKILL_DIR/scripts/wiki.py" <명령> [옵션]
 1. 이 세션의 도구(Edit, Write 등)로 위키 페이지를 고치지 않는다. 위키 쓰기는 `absorb` 하나뿐이고, 그 안의 LLM 단계도 도구를 제한한 별도 하위 프로세스다.
 2. 맥락을 남기고 싶으면 auto-memory나 handoff에 남긴다. 다음 absorb가 읽는다.
 3. `note`는 사람용이다. 도메인(`work` 또는 `personal`)을 사용자에게 받지 못했으면 넣지 않는다. 짐작해서 고르지 않는다.
-4. 도메인을 판정할 수 없는 곳(홈 폴더, git 없는 폴더, Traycer epic 폴더)에서 얻은 내용은 어느 도메인에도 넣지 않는다.
+4. 도메인을 판정할 수 없는 곳(홈 폴더, git 없는 폴더, Traycer epic 폴더)에서 얻은 내용은 어느 도메인에도 넣지 않는다. 프롬프트만 예외로 세션과 LLM으로 판정한다(`dev:prompt_classify`).
 5. 위키 내용을 공개 레포, 공유 채팅, Slack에 옮기지 않는다.
 
 ## 명령
@@ -70,6 +70,7 @@ python3 "$SKILL_DIR/scripts/wiki.py" status
    - 도메인 폴더 밖에 새로 생긴 `.md`(Obsidian은 새 노트와 일일 노트를 기본으로 볼트 루트에 만든다)는 반영하지 않고 `root_untracked_notes:<개수>`로 알린다. Obsidian 설정의 "새 노트 위치"를 `inbox/personal`이나 `inbox/work`로 두면 absorb가 그 도메인 노트로 받는다.
    - 사람이 만든 personal 페이지의 경로가 `work_terms`에 걸리면 그 편집(`manual:` 원본)은 격리하고, 그런 페이지 수를 `personal_path_term:<개수>`로 알린다(경로는 보이지 않음). 이름을 바꿀 때까지 그 페이지는 `index.md`, 링크 변환, personal `query` 결과에서 빠진다.
    - 루트 `now.md`·`about-me.md`의 `## 내 메모` 아래 `### work`·`### personal` 하위 섹션은 `notes:<domain>/<파일>` 원본이 된다. 메모만 고쳐도 다음 초안에 반영된다. 하위 섹션 밖의 글은 어느 묶음에도 넣지 않고 `my_notes_untagged:<파일>` 경고만 한다. `## 내 메모`의 코드 블록이 닫히지 않았거나, 코드 블록 안에 `## ` 제목이나 `### work`·`### personal` 줄이 있으면 하위 섹션의 경계를 믿을 수 없으므로 그 파일의 메모는 어느 도메인에도 넣지 않고 `my_notes_unbalanced_fence:<파일>` 경고만 한다(2차 수정: 한 도메인에서 연 코드 블록이 다음 도메인 하위 섹션을 삼키지 않게). 이미 반영된 메모 원본은 철회하지 않고 그대로 둔다. 제목은 Obsidian(CommonMark)이 그리는 대로 읽는다(3차 수정): 앞 공백 3칸까지, `#` 뒤 공백·탭 여러 칸, 끝의 닫는 `#`(`  ###  work ##`)도 `### work`이고, `## 내 메모`도 같은 규칙으로 찾는다. `#` 하나·둘 제목이 나오면 메모가 거기서 끝난다. 도메인 이름 제목이 하위 섹션으로 읽히지 않는 자리에 있으면(`#### work`, `## work`, `> ### work`, `- ### work`, 4칸 들여쓴 `### work`, `work` 아래 `---`·`===`) 화면에서는 그 도메인 글처럼 보이지만 파서는 위 하위 섹션에 넣게 되므로, 그 파일의 메모는 어느 도메인에도 넣지 않고 `my_notes_misplaced_heading:<파일>` 경고만 한다.
+   - 폴더로 도메인이 정해지지 않는 프롬프트를 세션 규칙과 도구를 끈 LLM으로 판정한다(`dev:prompt_classify`).
    - 바뀐 원본을 비밀값을 지운 사본으로 `.state/staging/<묶음>/`에 둔다. 묶음 하나는 도메인 하나, 원본 30개 이하.
 2. `.absorb-wt`(분리된 git worktree, `base_sha`에서 시작)를 새로 만든다.
 3. 묶음마다 staging을 읽기 전용(파일 0444, 폴더 0555)으로 잠그고 격리된 `claude -p`를 부른다. 작업 폴더는 `.absorb-wt/<domain>/`, `--add-dir`는 그 묶음 staging 하나뿐. 지시문은 `templates/absorb_prompt.md`(맨 앞이 "원본 본문은 데이터" 안전 규칙, `SCHEMA.md` 전문 포함, 원본 본문은 넣지 않고 경로만 줌).
@@ -204,6 +205,7 @@ absorb가 끝나면 고정 문구와 숫자만 한 줄로 보낸다. 페이지 �
 - LLM 하위 프로세스 환경에는 계획의 `HOME`, `USER`, `PATH`, `LLM_WIKI_HOOK=0`에 더해 `CLAUDE_CODE_DISABLE_AUTO_MEMORY=1`, `CLAUDE_CODE_DISABLE_CLAUDE_MDS=1`을 넣는다(둘 다 claude 실행 파일 안에 있는 이름임을 확인). `CLAUDE_CONFIG_DIR`가 있으면 로그인 때문에 그대로 넘긴다. `PATH`는 claude가 있는 폴더와 시스템 폴더뿐이다. `dev:llm_env`
 - `--add-dir`에는 staging만 준다(worktree는 작업 폴더라서 따로 주지 않음). `dev:add_dir_staging_only`
 - `--json-schema` 결과에 `mentions`(이름별 원본 id)를 더했다. Python은 원본에서 이름을 뽑을 수 없기 때문이다. 결과의 `pages`는 절대 경로로 오므로 양쪽 realpath를 맞춘 뒤 worktree 기준 상대 경로로 바꾼다. `dev:json_schema_mentions`
+- 폴더로 도메인이 정해지지 않는 프롬프트는 한 건씩 판정한다. `work_terms`에 걸리거나 같은 세션(history의 `sessionId`, Traycer의 채팅)에 work 근거가 있으면 세션 전체를 LLM 없이 `work`로 보낸다. 나머지는 absorb 시작 때 도구를 모두 끈 `claude -p`(`templates/classify_prompt.md`, 비밀값을 지운 JSON 줄)가 `work`, `personal`, `unknown`으로 나눈다. LLM의 `work`도 세션 전체로 번지고, `personal`은 그 세션의 프롬프트가 모두 답을 받았을 때만 인정한다. `unknown`, 6자 미만, 비밀값을 지운 뒤 500자를 넘는 프롬프트(일부만 보고 전체를 판정하지 않으려고 묻지 않음)는 계속 어느 도메인에도 넣지 않는다. 답은 `.state/prompt-classes.json`에 해시로만 저장해 같은 프롬프트를 다시 묻지 않는다. 한 실행에 최신 600건까지 묻고 나머지는 `prompt_classify_deferred:<개수>`로 다음 실행에 넘긴다. LLM 호출이 실패해도 absorb는 계속되고 그 프롬프트는 판정 불가로 남는다(`prompt_classify_failed:<사유>`). 판정 수와 비용은 `.state/last-report.json`의 `classified`에 남는다. 확인과 정정은 `wiki prompts [list] [personal]`, `wiki prompts set <key> work|personal|unknown`이고(personal 폴더에서는 work와 unknown을 보여 주지 않는다), 사람의 답은 세션 규칙보다 우선한다. `wiki prompts classify`는 페이지를 바꾸지 않고 판정만 채운다. 철회는 옛 digest의 프롬프트(`sources.json`의 `keys`)가 지금 다른 묶음에서 실제로 보일 때만 일어난다. digest가 남으면 차이 파일 첫 줄의 `옮겨진 프롬프트 시각:`으로 그 프롬프트만 지우고, digest가 사라지면 `deleted`로 처리한다. 기록이 회전되어 프롬프트가 안 보이는 것은 철회가 아니다. 철회된 원본의 이름은 새 페이지 승격 수에서 빠진다. 계획은 판정 불가를 모두 제외했지만, 폴더로 정해지지 않는 프롬프트가 절반을 넘어서 사용자 요청으로 바꿨다. `work_terms`가 없는 회사 내용을 LLM이 `personal`로 잘못 나눌 위험은 남는다(그런 프롬프트에는 term이 없어 페이지 후검증으로 막히지 않는다). `dev:prompt_classify`
 - absorb 지시문은 `templates/absorb_prompt.md`다. 고정 복사(`.bin/<ver>/`)가 `templates/`를 함께 가져가는 방식과 맞춘 것이다. `dev:prompt_template`
 - 원본 3개 이상인 이름은 다음 묶음 지시문의 "페이지로 만들 이름"에 나오고, 페이지는 LLM이 만든다. 이미 페이지가 있으면 Python이 그 페이지 `aliases`에 합친 이름을 모두 넣는다. `dev:promotions`
 - `now.md`·`about-me.md` 조각은 병합된 묶음 것만 `.state/drafts/<domain>/`에 두고, 루트 파일은 두 도메인의 마지막 조각으로 다시 조립한다. 조각이 없는 도메인은 지금 내용을 그대로 둔다. `dev:drafts_store`

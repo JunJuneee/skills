@@ -880,8 +880,27 @@ def update_mentions(sources_data, domain, mentions, merges):
 
 def stored_mentions(sources_data, domain):
     block = (sources_data.get("mentions") or {}).get(domain) or {}
-    mentions = collections.OrderedDict((name, set(ids)) for name, ids in block.items())
-    merges = (sources_data.get("mention_groups") or {}).get(domain) or []
+    entries = sources_data.get("sources") or {}
+
+    def counts(source_id):
+        # A withdrawn source (a prompt moved to the other domain) must not
+        # bring its name back as a page to create here.
+        entry = entries.get(source_id)
+        return not entry or (entry.get("status") != "deleted" and entry.get("domain") == domain)
+    mentions = collections.OrderedDict()
+    retired = set()
+    for name, ids in block.items():
+        live = set(i for i in ids if counts(i))
+        if live or not ids:
+            mentions[name] = live
+        else:
+            retired.add(fold(name))
+    # A merge group would otherwise bring a retired name back as an alias.
+    merges = []
+    for group in (sources_data.get("mention_groups") or {}).get(domain) or []:
+        kept = [name for name in group if fold(name) not in retired]
+        if len(kept) >= 2:
+            merges.append(kept)
     return mentions, merges
 
 
