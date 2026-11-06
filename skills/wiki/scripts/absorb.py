@@ -55,6 +55,7 @@ SCRIPTS_DIR = os.path.dirname(os.path.abspath(__file__))
 if SCRIPTS_DIR not in sys.path:
     sys.path.insert(0, SCRIPTS_DIR)
 
+import classify  # noqa: E402
 import common  # noqa: E402
 import prepare  # noqa: E402
 import redact  # noqa: E402
@@ -286,6 +287,24 @@ def build_argv(claude_path, staging_dir, model, budget, schema_text):
     ]
 
 
+def build_classify_argv(claude_path, model, budget, schema_text):
+    """Same isolation as build_argv with every tool off: the prompt text is
+    all the LLM gets (measured: --json-schema still answers with --tools "")."""
+    return [
+        claude_path, "-p",
+        "--restricted",
+        "--strict-mcp-config",
+        "--setting-sources", "",
+        "--tools", "",
+        "--permission-prompts", "none",
+        "--no-session-persistence",
+        "--output-format", "json",
+        "--json-schema", schema_text,
+        "--model", model,
+        "--max-budget-usd", "%s" % budget,
+    ]
+
+
 def parse_claude_output(stdout):
     """The single JSON result of --output-format json (last JSON line)."""
     text = stdout.decode("utf-8", "replace").strip()
@@ -333,8 +352,12 @@ class ClaudeRunner(object):
         self.probed = True
 
     def __call__(self, request):
-        argv = build_argv(self.claude_path, request["staging_dir"], self.model, self.budget,
-                          json.dumps(request["schema"], ensure_ascii=False))
+        schema_text = json.dumps(request["schema"], ensure_ascii=False)
+        if request.get("tools_off"):
+            argv = build_classify_argv(self.claude_path, self.model, self.budget, schema_text)
+        else:
+            argv = build_argv(self.claude_path, request["staging_dir"], self.model, self.budget,
+                              schema_text)
         try:
             proc = subprocess.run(argv, input=request["prompt"].encode("utf-8"),
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -1098,8 +1121,20 @@ def new_report():
     return report
 
 
+def prompt_classifier(environ):
+    """prepare's hook for prompts whose folder gives no domain (classify.py).
+    The runner, and so the claude probe, only happens when something is asked."""
+    def run(root, pending, classes, domains, warnings, since_date):
+        return classify.classify(
+            root, pending, classes, domains,
+            lambda: ClaudeRunner.from_settings(common.load_settings(root), environ),
+            read_template(classify.TEMPLATE), warnings, since_date, run.stats)
+    run.stats = {}
+    return run
+
+
 def absorb(root, environ=None, paths=None, now=None, runner=None, rules_path=None,
-           scheduled=False, fs_root="/", remote_fn=None):
+           scheduled=False, fs_root="/", remote_fn=None, classifier=None):
     """Run absorb once. Returns the report dict (also summarized in
     .state/last-absorb). Raises LockBusy when another absorb holds the lock
     and WikiError(not_initialized) for a missing wiki."""
@@ -1111,7 +1146,8 @@ def absorb(root, environ=None, paths=None, now=None, runner=None, rules_path=Non
         write_running_marker(root, now)
         try:
             return _run(root, environ, paths, now, runner,
-                        rules_path or default_rules_path(environ), scheduled, fs_root, remote_fn)
+                        rules_path or default_rules_path(environ), scheduled, fs_root, remote_fn,
+                        classifier)
         except Exception as exc:
             # Whatever raised after the lock, `status` must not keep showing
             # the previous run's line: record a failed run, then re-raise
@@ -1172,14 +1208,17 @@ def read_running_marker(root):
     return data
 
 
-def _run(root, environ, paths, now, runner, rules_path, scheduled, fs_root, remote_fn):
+def _run(root, environ, paths, now, runner, rules_path, scheduled, fs_root, remote_fn,
+         classifier=None):
     report = new_report()
     report["scheduled"] = bool(scheduled)
     report["rules_path"] = rules_path
     previous = read_last_absorb(root)
+    if classifier is None and runner is None:
+        classifier = prompt_classifier(environ)
     try:
         prep = prepare.prepare(root, environ, paths, now, locked=True, fs_root=fs_root,
-                               remote_fn=remote_fn)
+                               remote_fn=remote_fn, prompt_classifier=classifier)
     except common.WikiError as exc:
         report["status"] = STATUS_FAILED
         report["reason"] = exc.reason
@@ -1188,6 +1227,7 @@ def _run(root, environ, paths, now, runner, rules_path, scheduled, fs_root, remo
         write_last_absorb(root, report, now)
         write_report_file(root, report)
         return report
+    report["classified"] = getattr(classifier, "stats", None) or {}
     run = common.read_run(root)
     prep_json = prepare.load_prepare(root)
     domains_cfg = common.load_domains(root)

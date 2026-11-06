@@ -1207,6 +1207,8 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
 # One "<code>:<short text>" per bullet of SKILL.md "계획과 달라진 점"; each
 # bullet ends with the same `dev:<code>` tag (tests/test_repo_hygiene.py).
 PLAN_DEVIATIONS = (
+    "prompt_classify:prompts in a folder with no domain are classified "
+    "(work_terms and session signals first, then a tools-off LLM; unknown stays out)",
     "claude_p_flags:restricted,acceptEdits,permission_prompts_none,"
     "no_session_persistence,output_format_json,json_schema; prompt on stdin",
     "allowed_globs:<domain>/** only (index.md,log.md,now.md,about-me.md,settings.json,"

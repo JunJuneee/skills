@@ -263,6 +263,70 @@ def cmd_absorb(args, environ):
     return EXIT_OK if report.get("ok") else EXIT_ERROR
 
 
+def cmd_prompts(args, environ):
+    """Prompts whose folder gives no domain: list them with what decided
+    them, correct one, or classify without running absorb. Prints prompt text,
+    so it is for the user's own terminal."""
+    import absorb
+    import classify
+    import prepare
+    import redact
+
+    root = common.resolve_root(args.root, environ)
+    if args.action == "classify":
+        ask = absorb.prompt_classifier(environ)
+        with common.wiki_lock(root):
+            _entries, _since, warnings = prepare.prompt_entries(root, environ,
+                                                                prompt_classifier=ask)
+        print(common.dumps_json(ask.stats).strip())
+        for warning in warnings:
+            sys.stderr.write("경고: %s\n" % warning)
+        return EXIT_OK
+    entries, since_date, _warnings = prepare.prompt_entries(root, environ)
+    entries = [entry for entry in entries if entry["via"] != "folder"]
+    wanted = args.key if args.action == "list" else None
+    if wanted and wanted not in classify.VALID:
+        sys.stderr.write("사용법: wiki prompts list [work|personal|unknown]\n")
+        return EXIT_ERROR
+    if args.action == "list":
+        # A personal (public-repo) session holds zero work text, and unknown
+        # may be work: the same rule as query.
+        owners = common.load_domains(root).get("owners") or {}
+        home = environ.get("HOME") or os.path.expanduser("~")
+        cwd = os.getcwd()
+        cwd_domain = None if common.undeterminable_cwd(cwd, home) else common.repo_domain(cwd, owners)
+        if cwd_domain == "personal":
+            if wanted and wanted != "personal":
+                raise common.WikiError("domain_conflict",
+                                       "이 폴더는 personal 도메인입니다. work와 unknown은 회사 레포나 "
+                                       "판정되지 않는 폴더에서 보세요")
+            wanted = "personal"
+    if args.action == "set":
+        if not args.key or args.key_class not in classify.VALID:
+            sys.stderr.write("사용법: wiki prompts set <key> work|personal|unknown\n")
+            return EXIT_ERROR
+        found = [e for e in entries if classify.prompt_key(e["record"]).startswith(args.key)]
+        if len(found) != 1:
+            sys.stderr.write("key가 프롬프트 하나를 가리키지 않습니다 (%d건)\n" % len(found))
+            return EXIT_ERROR
+        record = found[0]["record"]
+        with common.wiki_lock(root):
+            classify.set_human(root, classify.prompt_key(record), args.key_class, record["date"],
+                               since_date)
+        print("%s → %s. 다음 absorb에 반영됩니다." % (classify.prompt_key(record)[:10], args.key_class))
+        return EXIT_OK
+    allow = common.load_domains(root).get("redact_allow", [])
+    for entry in entries:
+        shown = entry["domain"] or "unknown"
+        if wanted and shown != wanted:
+            continue
+        record = entry["record"]
+        text = redact.redact(record["text"], allow).text
+        print("%s %s %-8s %-7s %s" % (classify.prompt_key(record)[:10], record["date"], shown,
+                                      entry["via"], " ".join(text.split())[:100]))
+    return EXIT_OK
+
+
 NOTE_MAX_CHARS = 20000
 
 
@@ -605,6 +669,14 @@ def build_parser():
     p_status = sub.add_parser("status", parents=[opts],
                               help="show last run, pending sources, warnings")
     p_status.set_defaults(func=cmd_status)
+
+    p_prompts = sub.add_parser("prompts", parents=[opts],
+                               help="list, correct or classify prompts with no folder domain")
+    p_prompts.add_argument("action", nargs="?", default="list", choices=("list", "set", "classify"))
+    p_prompts.add_argument("key", nargs="?",
+                           help="list: only this class; set: a key (or its start) from the list")
+    p_prompts.add_argument("key_class", nargs="?", metavar="class", help="set: the new class")
+    p_prompts.set_defaults(func=cmd_prompts)
 
     p_schedule = sub.add_parser("schedule", parents=[opts],
                                 help="install, remove or print the launchd job (opt-in)")
