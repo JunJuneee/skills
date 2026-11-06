@@ -283,6 +283,32 @@ class RulesAndCachesTest(RepoCase):
             self.pref("p%02d" % index, "규칙 %02d" % index)
         self.assertEqual(len(verify.rules_lines(self.wt, DOMAINS_CFG)), verify.RULES_MAX_LINES)
 
+    def test_emptied_page_is_left_out_of_caches_and_index(self):
+        write(os.path.join(self.wt, "personal", "prefs", "gone.md"),
+              page("빈 선호", kind="pref", body="## 선호\n\n## Why\n\n## How to apply\n",
+                   fm_extra="scope: domain\nsummary: 내용을 비웠다\n"))
+        write(os.path.join(self.wt, "personal", "projects", "gone.md"),
+              page("빈 프로젝트", kind="project", body="## 현재 상태\n\n## 내 메모\n\n손으로 쓴 글\n",
+                   fm_extra="status: active\nsummary: 내용을 비웠다\n"))
+        self.pref("살아 있는 선호", "내용", scope="domain")
+        cache = verify.build_context_cache(self.wt, DOMAINS_CFG, "r", NOW)
+        block = cache["domains"]["personal"]
+        self.assertEqual([p["title"] for p in block["prefs"]], ["살아 있는 선호"])
+        self.assertEqual(block["projects"], [])
+        aliases = verify.build_alias_cache(self.wt, NOW, DOMAINS_CFG)["domains"]["personal"]
+        self.assertEqual([e["title"] for e in aliases], ["살아 있는 선호"])
+        index = verify.build_index(self.wt, NOW)
+        self.assertNotIn("빈 선호", index)
+        self.assertNotIn("빈 프로젝트", index)
+
+    def test_pref_text_keeps_every_summary_line(self):
+        write(os.path.join(self.wt, "personal", "prefs", "roles.md"),
+              page("역할", kind="pref", body="## 선호\n\n- 본문\n<!-- src: mem:x/a.md @2026-11-04 -->\n",
+                   fm_extra="scope: domain\nsummary: |\n  구현은 A가 한다.\n  B 레포에만 해당한다.\n"))
+        cache = verify.build_context_cache(self.wt, DOMAINS_CFG, "r", NOW)
+        self.assertEqual(cache["domains"]["personal"]["prefs"][0]["text"],
+                         "구현은 A가 한다. B 레포에만 해당한다.")
+
     def test_context_cache_shape(self):
         self.pref("local", "레포 규칙", scope="repo")
         write(os.path.join(self.wt, "personal", "projects", "p.md"),

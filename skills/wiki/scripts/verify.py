@@ -506,6 +506,21 @@ def section_text(body, heading):
     return "".join(out)
 
 
+def page_is_empty(page):
+    """True when only headings and src comments are left above '## 내 메모',
+    which is what an absorb leaves after every source of a page was withdrawn."""
+    for line in common.split_my_notes(page.body)[0].splitlines():
+        line = common.SRC_COMMENT_RE.sub("", line).strip()
+        if line and not line.startswith("#") and not line.startswith("<!--"):
+            return False
+    return True
+
+
+def live_pages(wt, domain):
+    """Pages that still say something: what indexes and caches may list."""
+    return [page for page in load_pages(wt, domain) if not page_is_empty(page)]
+
+
 def first_text_line(text):
     for line in strip_fences(text or "").splitlines():
         line = common.SRC_COMMENT_RE.sub("", line).strip()
@@ -1100,7 +1115,7 @@ def build_index(wt, now, terms=None):
              % now.strftime("%Y-%m-%d %H:%M"), ""]
     for domain, subdirs in common.DOMAIN_SUBDIRS.items():
         lines += ["## %s" % domain, ""]
-        pages = load_pages(wt, domain)
+        pages = live_pages(wt, domain)
         if domain == "personal" and terms is not None:
             pages = [page for page in pages if not terms.hits(page.path)]
         for sub in subdirs:
@@ -1166,7 +1181,7 @@ def recent_decisions(wt, now, days=30, limit=10):
     since = (now - datetime.timedelta(days=days)).strftime("%Y-%m-%d")
     items = []
     for domain in common.DOMAINS:
-        for page in load_pages(wt, domain):
+        for page in live_pages(wt, domain):
             if page.fm.get("type") != "decision":
                 continue
             decided = page.fm.get("decided")
@@ -1509,7 +1524,8 @@ def _pref_entry(page):
     entry["scope"] = page.fm.get("scope") or "domain"
     entry["repos"] = _str_list(page.fm.get("repos"))
     summary = page.fm.get("summary") if isinstance(page.fm.get("summary"), str) else ""
-    entry["text"] = first_text_line(summary) or first_text_line(section_text(page.body, "선호"))
+    # The whole summary: its later lines often limit where the pref applies.
+    entry["text"] = " ".join(summary.split()) or first_text_line(section_text(page.body, "선호"))
     return entry
 
 
@@ -1538,7 +1554,7 @@ def build_context_cache(wt, domains_cfg, run_id, now, pending=None):
     for domain in common.DOMAINS:
         projects = []
         prefs = []
-        for page in load_pages(wt, domain):
+        for page in live_pages(wt, domain):
             kind = page.fm.get("type")
             if kind == "project":
                 entry = _project_entry(page, now)
@@ -1572,7 +1588,7 @@ def build_alias_cache(wt, now, domains_cfg=None):
     blocks = collections.OrderedDict()
     for domain in common.DOMAINS:
         entries = []
-        for page in load_pages(wt, domain):
+        for page in live_pages(wt, domain):
             if not clean_name(page.title, domain, terms, allow) or not clean_name(
                     page.path, domain, terms, allow):
                 continue
