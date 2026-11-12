@@ -4,14 +4,14 @@
 
 Traycer agent selection guide를 읽고 `traycer_list_harness_models`로 실제 실행 호스트·작업 디렉터리의 지원 모델·추론 수준을 확인한다. 명시적인 사용자 지시를 우선하고, 역할별 모델 식별자는 최초 배정 시 사용 가능한 같은 계열 최신 모델로 해석해 정확한 식별자를 기록한다.
 
-**계열의 기준은 실제 구현 하네스다.** 사용자 지정 → 기존 작업 계약 → 현재 Codex/Claude 세션 순으로 구현 계열을 정하며 어느 쪽으로도 정할 수 없으면 Codex가 기본값이다. 조율자가 Codex여도 Claude 구현을 지정했으면 Codex가 critique한다. 반대로 Claude 조율자가 Codex 구현을 지정했으면 Claude가 critique한다. 테스트 작성자나 최종 PR 리뷰어 모델로 반대 계열을 계산하지 않는다.
+**계열의 기준은 실제 구현 하네스다.** 사용자 지정 → 기존 작업 계약 → 현재 Codex/Claude 세션 순으로 구현 계열을 정하며 어느 쪽으로도 정할 수 없으면 Claude가 기본값이다. **구현은 Claude Sonnet · high로 고정한다.** 사용자가 Codex 구현을 명시하거나 진행 중인 작업 계약이 이미 Codex 구현이면 그 계약만 유지하고, 새 작업은 Opus·Codex로 구현하지 않는다. 조율자가 Codex여도 Claude 구현을 지정했으면 Codex가 critique한다. 반대로 Claude 조율자가 Codex 구현을 지정했으면 Claude가 critique한다. 테스트 작성자나 최종 PR 리뷰어 모델로 반대 계열을 계산하지 않는다.
 
 한 이슈마다 `implementation_harness`, `critique_harness`, 계획 작성자·조율자·구현자·검토자의 실제 모델과 세션 ID를 작업 계약에 고정한다. 실행 계획의 기술 내용은 구현 계열의 세션이 작성·보완한다. 조율자 계열이 달라도 계획 작성자와 critique는 반대 계열이 된다. 중간에 구현 계열을 명시적으로 바꾸면 새 구현 계열에서 계획을 보완하고 그 반대 계열이 작업 계약의 인원으로 critique를 다시 수행하며 테스트·검증 배정도 새 구현 계열에 맞춘다. 이전 계획 critique 결과는 이력으로 보존하되 새 조합의 critique로 세지 않는다. 장애 때문에 구현 계열을 몰래 바꾸지 않는다.
 
 | 역할 | Codex 구현 | Claude 구현 | 경계 |
 | --- | --- | --- | --- |
 | 조율·외부 쓰기 | 현재 작업 소유 조율자 | 현재 작업 소유 조율자 | Codex/Claude 중 단일 담당, 모델 계열은 구현자와 달라도 됨 |
-| 실행 계획 작성·구현·리뷰 지적 수정 | Codex Terra · xhigh | Claude Opus · xhigh | 계획 후 critique 결과 반영·로컬 구현·커밋, 외부 쓰기는 조율자 담당 |
+| 실행 계획 작성·구현·리뷰 지적 수정 | Codex Terra · xhigh | Claude Sonnet · high | 계획 후 critique 결과 반영·로컬 구현·커밋, 외부 쓰기는 조율자 담당 |
 | TC·테스트 코드 작성 | 별도 Codex Luna · high | 별도 Claude Sonnet · medium | 구현자와 다른 세션 |
 | 독립 테스트 실행·검증 | 또 다른 Codex Luna · high | 또 다른 Claude Sonnet · medium | 최종 코드에서 실제 검사·증거 확인 |
 | 복잡한 테스트·원인 분석 | Codex Terra · xhigh | Claude Opus · xhigh | 어려운 작업을 상향 |
