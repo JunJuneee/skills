@@ -95,7 +95,6 @@ JAY-638 | Done | [agent-decided]
 
 ```
 대상 = 상태가 Todo
-     AND 담당자가 Jay
      AND agent-running 없음
      AND agent-hold 없음
      AND blocked 없음
@@ -103,7 +102,8 @@ JAY-638 | Done | [agent-decided]
      AND owner-action 없음
 ```
 
+- **담당자 조건 없음** — Todo 이슈는 모두 사용자 소유이므로 담당자로 필터링하지 않는다.
 - 유형·도메인·기능·단계 라벨은 **선정에 영향 없음** (분류 전용)
 - `analytics-daily`도 선정에 영향 없음
-- 저녁에 이슈를 **Todo + Jay 담당**으로 등록하면 야간(22:00~08:00 KST)에 자동 실행
+- 이슈를 **Todo** 상태로 두면 야간(22:00~08:00 KST)에 자동 실행 (우선순위순 최대 3개)
 - 실행을 막으려면 `agent-hold` 또는 `blocked` 부착
