@@ -139,12 +139,14 @@ PR을 병합합니다.
 [라벨 사용법](references/linear-labels.md)을 따른다.
 
 ```
-대상 = Todo 상태 + Jay 담당
+대상 = Todo 상태
      + agent-running / agent-hold / blocked / needs-confirm / owner-action 라벨 없음
 ```
 
+- **담당자 조건 없음** — Todo 이슈는 모두 사용자 소유이므로 담당자로 필터링하지 않는다.
 - 유형·도메인·기능·단계 라벨은 선정에 영향 없음 (분류 전용)
 - 실행을 막으려면 `agent-hold` 또는 `blocked` 부착
+- 우선순위순(긴급→높음→보통→낮음→없음)으로 최대 3개 선정
 
 ### cron 구조
 
@@ -159,7 +161,7 @@ PR을 병합합니다.
 
 ### 실행 흐름
 
-1. gate가 Todo + Jay + 제외라벨 없는 이슈를 조회 (최대 3개, 우선순위순)
+1. gate가 Todo + 제외라벨 없는 이슈를 조회 (최대 3개, 우선순위순)
 2. 대상 없으면 턴 없이 스킵
 3. 대상 있으면 각 이슈에 `agent-running` 부착 + In Progress 전환
 4. Traycer 에이전트 생성 (qwen4-max-preview) → 구현
@@ -171,7 +173,6 @@ PR을 병합합니다.
 
 - CLI: `~/.local/bin/composio`, 계정: `--account homeshopick`
 - 팀: Jay's workplace (`9a22735e-e176-4f95-8fc8-5207d2dc50f2`)
-- Jay: `f777c018-ba23-48e8-804a-1b23ec3b87fe`
 - 상태 ID: Todo `21512dc7`, In Progress `80c354a8`, In Review `48478ced`, Done `3efd5025`
 - 라벨 ID: agent-running `d5fd5d5d`, agent-hold `a70d6632`
 
