@@ -1,6 +1,6 @@
 ---
 name: linear-create
-description: Linear 이슈를 생성한다. 담당자는 기본으로 본인(오한준)이고, 상위 이슈가 완료·취소된 경우 하위 이슈를 만들지 않는다. "이슈 만들어줘", "리니어에 등록", "하위 이슈 만들어줘", "리니어 이슈 생성" 등의 요청 시 사용.
+description: Linear 이슈를 생성한다(Composio 경유). 담당자는 기본으로 본인(Jay)이고, 상위 이슈가 완료·취소된 경우 하위 이슈를 만들지 않는다. "이슈 만들어줘", "리니어에 등록", "하위 이슈 만들어줘", "리니어 이슈 생성" 등의 요청 시 사용.
 ---
 
 # Linear Create
@@ -9,7 +9,7 @@ description: Linear 이슈를 생성한다. 담당자는 기본으로 본인(오
 
 ## 규칙
 
-1. **담당자 기본값은 본인(토큰 소유자, 오한준)**이다. 다른 사람에게 줄 때만 `--assignee <userId>`를 준다. 이름→id 변환은 하지 않는다(동명이인 위험).
+1. **담당자 기본값은 이 워크스페이스의 본인(JAY 워크스페이스에서는 Jay)**이다. 다른 사람에게 줄 때만 `--assignee <userId>`를 준다. 이름→id 변환은 하지 않는다(동명이인 위험).
 2. **완료(`completed`)·취소(`canceled`) 상위 이슈 아래에는 만들지 않는다.** `--parent`의 부모가 이 상태면 생성 전에 중단한다. 부모는 쓰기 전에 항상 조회한다.
 3. **팀은 추정하지 않는다.** `--team <KEY>`(예: `JAY`)를 주거나 `LINEAR_TEAM_ID`를 설정한다. 둘 다 없으면 중단한다.
 
@@ -30,7 +30,7 @@ python3 ~/.claude/skills/linear-create/scripts/linear_create.py "<제목>" "<설
   --team JAY [--parent JAY-543] [--assignee <userId>] [--priority 1-4] [--project <id>] [--label <id>]
 ```
 
-필요 환경변수: `LINEAR_API_TOKEN`(개인 API 키). 담당자 기본값은 이 토큰의 소유자로 정해지므로 별도 설정이 필요 없다.
+실행 경로는 Composio다. `composio` CLI에 로그인되어 있어야 하며, 계정은 `linear_valsa-tenino`("Jay's workplace")가 기본이다. 다른 계정을 쓸 때만 `LINEAR_COMPOSIO_ACCOUNT`를 설정한다. API 키는 필요 없다.
 
 ## 출력
 

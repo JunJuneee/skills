@@ -2,20 +2,21 @@
 """Linear 이슈 생성기.
 
 규칙
-- 담당자 기본값: 토큰 소유자(viewer) — 현재 오한준. `--assignee <userId>`로 재지정.
+- 담당자 기본값: 이 워크스페이스의 본인(viewer) — JAY 워크스페이스에서는 Jay. `--assignee <userId>`로 재지정.
 - `--parent <ID>`: 부모가 completed/canceled면 생성하지 않는다(생성 전 중단).
 - 팀: `--team <KEY>` 또는 LINEAR_TEAM_ID. 둘 다 없으면 중단(기본 팀을 가정하지 않는다).
 
-인증: LINEAR_API_TOKEN (Linear 개인 API 키).
+실행 경로: Composio CLI(`composio execute LINEAR_RUN_QUERY_OR_MUTATION`)로 Linear GraphQL을 호출한다.
+계정은 LINEAR_COMPOSIO_ACCOUNT(기본 `linear_valsa-tenino` = "Jay's workplace")로 고른다.
 """
 
 import argparse
 import json
 import os
+import subprocess
 import sys
-import urllib.request
 
-API_URL = "https://api.linear.app/graphql"
+DEFAULT_COMPOSIO_ACCOUNT = "linear_valsa-tenino"
 CLOSED_PARENT_STATE_TYPES = ("completed", "canceled")
 
 
@@ -23,21 +24,30 @@ class LinearError(RuntimeError):
     pass
 
 
-def graphql(query, variables=None, token=None, post=None):
-    """post: 테스트용 주입점. 기본은 실제 HTTP 호출."""
-    if post is None:
-        token = token or os.environ.get("LINEAR_API_TOKEN", "")
-        if not token:
-            raise LinearError("LINEAR_API_TOKEN 환경변수가 없습니다.")
+def composio_post(payload):
+    """GraphQL 페이로드를 Composio로 실행하고 {"data", "errors"} 모양으로 돌려준다."""
+    account = os.environ.get("LINEAR_COMPOSIO_ACCOUNT") or DEFAULT_COMPOSIO_ACCOUNT
+    body = json.dumps({"query_or_mutation": payload["query"], "variables": payload["variables"]})
+    try:
+        proc = subprocess.run(
+            ["composio", "execute", "LINEAR_RUN_QUERY_OR_MUTATION", "--account", account, "-d", body],
+            capture_output=True, text=True, timeout=60,
+        )
+    except FileNotFoundError:
+        raise LinearError("composio CLI가 없습니다. `composio login` 후 다시 실행하세요.")
+    try:
+        out = json.loads(proc.stdout)
+    except json.JSONDecodeError:
+        raise LinearError(f"Composio 응답을 해석할 수 없습니다: {(proc.stdout or proc.stderr)[:200]}")
+    if not out.get("successful"):
+        raise LinearError(f"Composio 실행 실패: {out.get('error')}")
+    inner = (out.get("data") or {})
+    return {"data": inner.get("data"), "errors": inner.get("errors")}
 
-        def post(payload):
-            req = urllib.request.Request(
-                API_URL, data=json.dumps(payload).encode(),
-                headers={"Authorization": token, "Content-Type": "application/json"},
-            )
-            with urllib.request.urlopen(req, timeout=30) as resp:
-                return json.load(resp)
 
+def graphql(query, variables=None, post=None):
+    """post: 테스트용 주입점. 기본은 Composio 경유 Linear 호출."""
+    post = post or composio_post
     body = post({"query": query, "variables": variables or {}})
     if body.get("errors"):
         raise LinearError(f"Linear API 오류: {body['errors'][0].get('message')}")
