@@ -1,11 +1,11 @@
 ---
 name: night-chinese-coding
-description: JunJuneee/skills 레포지토리 야간(22:00~08:00 KST) 작업 시 코딩은 qwen4-max-preview, 리뷰는 deepseek-v4-pro-0813을 사용한다. PR comment 기반 리뷰 루프로 문제가 없을 때까지 반복 후 병합하며 배포는 절대 하지 않는다. 사용자 확인이 필요한 사항은 이중 critique(deepseek-v4-pro-0813 + 신규 세션 qwen4-max-preview)로 판단해 진행하고, 크리티컬한 경우에만 보류한다.
+description: JunJuneee/skills 레포지토리 야간(23:00~09:00 KST) 작업 시 코딩은 qwen4-max-preview, 리뷰는 deepseek-v4-pro-0813을 사용한다. PR comment 기반 리뷰 루프로 문제가 없을 때까지 반복 후 병합하며 배포는 절대 하지 않는다. 사용자 확인이 필요한 사항은 이중 critique(deepseek-v4-pro-0813 + 신규 세션 qwen4-max-preview)로 판단해 진행하고, 크리티컬한 경우에만 보류한다.
 ---
 
 # Night Chinese Coding
 
-**`JunJuneee/skills` 레포지토리**에서 **야간 시간대(22:00 ~ 08:00 KST)**에 작업을 할 때 적용하는 규칙이다.
+**`JunJuneee/skills` 레포지토리**에서 **야간 시간대(23:00 ~ 09:00 KST)**에 작업을 할 때 적용하는 규칙이다.
 
 - **코딩**: qwen4-max-preview (야간 정가 8% 할인)
 - **리뷰**: deepseek-v4-pro-0813 (야간 50% 할인)
@@ -13,14 +13,14 @@ description: JunJuneee/skills 레포지토리 야간(22:00~08:00 KST) 작업 시
 - **사용자 확인 대체**: 확인 필요 사항 → 이중 critique → 수정 → 진행 (크리티컬만 보류)
 - **배포 절대 금지**
 
-> **야간 할인 정보** — qwen4-max-preview: 2026.11.11~25 기간 중 22:00~08:00 UTC+8 추가 60% 할인 (정가 8%). deepseek-v4-pro-0813: 22:00~08:00 UTC+8 50% 할인.
+> **야간 할인 정보** — qwen4-max-preview: 2026.11.11~25 기간 중 22:00~08:00 UTC+8 추가 60% 할인 (정가 8%). deepseek-v4-pro-0813: 22:00~08:00 UTC+8 50% 할인. 할인 구간 22:00~08:00 UTC+8은 **KST로 23:00~09:00**이다(KST는 UTC+9). 이 스킬의 야간 시간대는 KST 23:00~09:00으로 맞춘다.
 
 ## 활성 조건 — 두 가지 동시 충족
 
 | # | 조건 | 내용 |
 |---|------|------|
 | 1 | **레포지토리** | 현재 작업 중인 레포가 `JunJuneee/skills`일 때만 발동. 다른 레포에서는 무시한다. |
-| 2 | **시간대** | 현재 시각이 **22:00 ~ 08:00 KST** 범위일 때. 주간(08:00 ~ 22:00 KST)에는 평소 모델을 그대로 사용한다. |
+| 2 | **시간대** | 현재 시각이 **23:00 ~ 09:00 KST** 범위일 때. 주간(09:00 ~ 23:00 KST)에는 평소 모델을 그대로 사용한다. |
 
 - 시간대는 KST 기준이며, 사용자가 다른 지역의 시간을 지정하면 그 기준으로 재계산한다.
 - 레포 조건이 충족되지 않으면 시간이 야간이어도 이 스킬을 적용하지 않는다.
@@ -155,7 +155,7 @@ critique 종합
 ## 6. 실행 흐름 요약
 
 ```
-시간 판정 (22:00~08:00 KST?) + 레포 판정 (JunJuneee/skills?)
+시간 판정 (23:00~09:00 KST?) + 레포 판정 (JunJuneee/skills?)
   ├─ Yes + Yes
   │    ↓
   │  qwen4-max-preview로 구현
@@ -197,7 +197,7 @@ critique 종합
 
 | 항목 | 값 |
 |------|-----|
-| 스케줄 | `3 22 * * *` (매일 22:03 KST) |
+| 스케줄 | `3 23 * * *` (매일 23:03 KST) |
 | gate | `scripts/night-gate.sh` — Composio로 Linear 조회, 대상 없으면 스킵 |
 | 병렬 | 최대 3개 이슈 동시 처리 |
 | 코딩 모델 | qwen4-max-preview |
