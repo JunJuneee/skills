@@ -97,6 +97,74 @@ class ResolveTest(unittest.TestCase):
         result = run(lane="L", switch="off", exhausted=["codex"])
         self.assertEqual(sorted(result["wait"]), ["critique", "review"])
 
+    def test_other_family_is_used_before_same_family(self):
+        # 리뷰: Qwen이 소진돼도 DeepSeek이 남아 있으면 같은 계열로 내려가지 않는다.
+        result = run(exhausted=["claude", "qwen"])
+        self.assertEqual(families(result), ("codex", ["deepseek"], "deepseek"))
+        self.assertFalse(result["roles"]["reviewer"].get("same_family"))
+        # critique: DeepSeek이 소진돼도 Qwen이 남아 있다.
+        result = run(exhausted=["claude", "deepseek"])
+        self.assertEqual(families(result), ("codex", ["qwen"], "qwen"))
+        self.assertFalse(result["roles"]["critics"][0].get("same_family"))
+
+    def test_same_family_only_when_no_other_family_is_left(self):
+        every = [[], ["claude"], ["codex"], ["qwen"], ["deepseek"], ["claude", "qwen"], ["claude", "deepseek"],
+                 ["codex", "qwen"], ["codex", "deepseek"], ["qwen", "deepseek"], ["claude", "qwen", "deepseek"],
+                 ["codex", "qwen", "deepseek"]]
+        for exhausted in every:
+            for switch in ("auto", "on", "off"):
+                for now in (DAY, NIGHT):
+                    result = run(switch=switch, now=now, exhausted=exhausted)
+                    if "implement" in result["wait"]:
+                        continue
+                    impl = result["roles"]["implement"]["family"]
+                    allowed = {"claude", "codex"} | ({"qwen", "deepseek"} if switch != "off" else set())
+                    others = allowed - {impl} - set(exhausted)
+                    checkers = result["roles"]["critics"] + [result["roles"].get("reviewer", {})]
+                    for checker in checkers:
+                        if checker.get("same_family"):
+                            self.assertEqual(others, set(), (exhausted, switch))
+
+    def test_high_risk_critique_never_uses_chinese_models(self):
+        result = run(lane="L", exhausted=["claude", "qwen"])
+        self.assertIn("critique", result["wait"])
+        self.assertEqual(result["roles"]["reviewer"]["family"], "deepseek")
+        for switch in ("auto", "on"):
+            for now in (DAY, NIGHT):
+                roles = run(lane="L", switch=switch, now=now)["roles"]
+                for r in [roles["implement"], roles["test_writer"], roles["verifier"]] + roles["critics"]:
+                    self.assertNotEqual(r["harness"], "qwen")
+
+    def test_escalation_target(self):
+        self.assertEqual(run()["escalation"]["model"], "gpt-6.1-sol")
+        night = run(now=NIGHT)
+        self.assertEqual(night["roles"]["implement"]["family"], "qwen")
+        self.assertEqual(night["escalation"]["model"], "gpt-6.1-sol")
+        self.assertNotEqual(night["escalation"]["family"], night["roles"]["reviewer"]["family"])
+        self.assertIsNone(run(lane="L")["escalation"])
+
+    def test_switch_file_parsing(self):
+        parse = resolve.parse_switch
+        self.assertEqual(parse("export NIGHT_ROSTER=off\n"), "off")
+        self.assertEqual(parse("# NIGHT_ROSTER=on\nNIGHT_ROSTER=off\n"), "off")
+        self.assertEqual(parse('NIGHT_ROSTER="off"\n'), "off")
+        self.assertEqual(parse("NIGHT_ROSTER='on'  # 강제\n"), "on")
+        self.assertEqual(parse("NIGHT_ROSTER=on\nNIGHT_ROSTER=auto\n"), "auto")
+        self.assertIsNone(parse("MY_NIGHT_ROSTER=on\nNIGHT_ROSTER=maybe\n"))
+
+    def test_window_that_does_not_cross_midnight(self):
+        policy = resolve.merge(POLICY, {"night": {"window_kst": [0, 9]}})
+        self.assertFalse(resolve.is_night(policy, DAY))
+        self.assertTrue(resolve.is_night(policy, datetime.datetime(2026, 11, 22, 3, 0, tzinfo=resolve.KST)))
+        utc = datetime.timezone.utc
+        self.assertTrue(resolve.is_night(POLICY, datetime.datetime(2026, 11, 22, 14, 0, tzinfo=utc)))
+        self.assertFalse(resolve.is_night(POLICY, datetime.datetime(2026, 11, 22, 0, 0, tzinfo=utc)))
+
+    def test_unknown_exhausted_family_is_rejected(self):
+        with self.assertRaises(ValueError):
+            resolve.parse_exhausted("codex,bogus", POLICY)
+        self.assertEqual(resolve.parse_exhausted(" codex , claude ", POLICY), ["codex", "claude"])
+
     def test_everything_exhausted_waits(self):
         result = run(exhausted=["codex", "claude"])
         self.assertIn("implement", result["wait"])
@@ -163,6 +231,56 @@ class PreflightTest(unittest.TestCase):
         body = "DB 마이그레이션 포함\n## 완료 기준\n- 적용된다\n"
         self.assertTrue(self.reasons(description=body)[1])
         self.assertEqual(self.reasons(description=body, labels=["lane-l"]), ("L", []))
+
+
+    def test_every_predecessor_on_the_line_is_checked(self):
+        body = "선행: JAY-100, JAY-101 완료 후 진행\n## 완료 기준\n- 입력 보존\n"
+        linked = [{"identifier": "JAY-100", "state_type": "completed"}]
+        lane, why = self.reasons(description=body, blocked_by=linked)
+        self.assertTrue(any("JAY-101" in r and "JAY-100" not in r for r in why))
+
+    def test_predecessor_section_list(self):
+        body = "## 선행 이슈\n- JAY-100\n- JAY-101\n## 완료 기준\n- 입력 보존\n"
+        lane, why = self.reasons(description=body)
+        self.assertTrue(any("JAY-100" in r and "JAY-101" in r for r in why))
+        self.assertEqual(self.reasons(description="## 참고\n- JAY-100 과 비슷함\n## 완료 기준\n- 입력 보존\n")[1], [])
+
+    def test_predecessor_match_ignores_case(self):
+        body = "depends on jay-100\n## 완료 기준\n- 입력 보존\n"
+        linked = [{"identifier": "JAY-100", "state_type": "completed"}]
+        self.assertEqual(self.reasons(description=body, blocked_by=linked)[1], [])
+
+    def test_empty_criteria_section_is_not_filled_by_a_later_list(self):
+        body = "## 완료 기준\n\n## 참고 자료\n- https://example.com/spec\n"
+        self.assertTrue(any("완료 기준" in r for r in self.reasons(description=body)[1]))
+        self.assertEqual(self.reasons(description="**완료 기준**\n1. 저장된다\n")[1], [])
+        self.assertEqual(self.reasons(description="완료 기준:\n- 저장된다\n")[1], [])
+
+    def test_high_risk_words_match_whole_ascii_words(self):
+        self.assertEqual(self.reasons(title="게시물 author 필드에 작성자 이름 표시")[1], [])
+        self.assertTrue(self.reasons(title="OAuth 토큰 갱신")[1])
+        self.assertTrue(self.reasons(title="auth 미들웨어 교체")[1])
+        self.assertTrue(self.reasons(title="권한 검사 변경")[1])
+
+    def test_cli_exit_codes(self):
+        import io
+        import json
+        from unittest import mock
+
+        def cli(payload, *args):
+            out = io.StringIO()
+            with mock.patch("sys.stdin", io.StringIO(json.dumps(payload))), mock.patch("sys.stdout", out), \
+                    mock.patch.object(resolve, "LOCAL_OVERRIDE", None):
+                code = preflight.main(["--project", "seoulseeing", "--now", "2026-11-22T14:00",
+                                       "--night-roster", "off"] + list(args))
+            return code, json.loads(out.getvalue())
+
+        self.assertEqual(cli(issue())[0], 0)
+        self.assertEqual(cli(issue(state="Backlog"))[0], 2)
+        code, result = cli(issue(), "--exhausted", "codex,claude")
+        self.assertEqual((code, result["ok"]), (3, False))
+        with self.assertRaises(SystemExit), mock.patch("sys.stderr", io.StringIO()):
+            preflight.main(["--project", "seoulseeing", "--exhausted", "bogus"])
 
 
 if __name__ == "__main__":

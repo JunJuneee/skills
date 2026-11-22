@@ -17,6 +17,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_POLICY = os.path.join(os.path.dirname(HERE), "policy.json")
 LOCAL_OVERRIDE = os.path.expanduser("~/.traycer/workflow-policy.json")
 KST = datetime.timezone(datetime.timedelta(hours=9))
+# 검토 역할로 쓸 때의 등급. 적혀 있지 않은 계열은 호출하는 쪽의 기본값을 쓴다.
+CHECK_TIER = {"deepseek": "heavy", "qwen": "std"}
 
 
 def merge(base, over):
@@ -29,7 +31,9 @@ def merge(base, over):
     return out
 
 
-def load_policy(path=None, override=LOCAL_OVERRIDE):
+def load_policy(path=None, override="default"):
+    if override == "default":
+        override = LOCAL_OVERRIDE
     with open(path or DEFAULT_POLICY, encoding="utf-8") as f:
         policy = json.load(f)
     if override and os.path.exists(override):
@@ -38,14 +42,26 @@ def load_policy(path=None, override=LOCAL_OVERRIDE):
     return policy
 
 
+SWITCH_LINE = re.compile(r"""^\s*(?:export\s+)?NIGHT_ROSTER\s*=\s*(['"]?)(auto|on|off)\1\s*(?:#.*)?$""")
+
+
+def parse_switch(text):
+    """스위치 파일에서 마지막 유효한 대입만 읽는다. 주석과 다른 키는 무시한다."""
+    value = None
+    for line in text.splitlines():
+        found = SWITCH_LINE.match(line)
+        if found:
+            value = found.group(2)
+    return value
+
+
 def read_switch(policy, env=None):
     """NIGHT_ROSTER 값(auto|on|off). 파일이 우선이고, 없으면 환경변수, 그것도 없으면 auto."""
     path = os.path.expanduser(policy["night"]["switch_file"])
     value = None
     if os.path.exists(path):
         with open(path, encoding="utf-8") as f:
-            found = re.search(r"NIGHT_ROSTER=(\w+)", f.read())
-        value = found.group(1) if found else None
+            value = parse_switch(f.read())
     if value is None:
         value = (os.environ if env is None else env).get("NIGHT_ROSTER")
     return value if value in ("auto", "on", "off") else "auto"
@@ -54,7 +70,9 @@ def read_switch(policy, env=None):
 def is_night(policy, now):
     start, end = policy["night"]["window_kst"]
     hour = now.astimezone(KST).hour
-    return hour >= start or hour < end
+    if start > end:  # 자정을 넘는 구간
+        return hour >= start or hour < end
+    return start <= hour < end
 
 
 def role(policy, family, tier, effort=None):
@@ -133,10 +151,12 @@ def resolve(policy, project, lane, switch, now, exhausted=(), switches=0):
     count = lane_cfg["critics"]
     out["roles"]["critics"] = []
     if count:
-        order = ["deepseek", "claude", "codex"] if cn_impl else ["claude", "codex"] + (["deepseek"] if cn_any else [])
+        # L 줄의 critique는 중국 모델을 쓰지 않는다.
+        cn_critics = ["deepseek", "qwen"] if cn_any and lane != "L" else []
+        order = cn_critics + ["claude", "codex"] if cn_impl else ["claude", "codex"] + cn_critics
         critic = first([f for f in order if f != impl])
         if critic and count == 1:
-            out["roles"]["critics"] = [role(policy, critic, "heavy" if critic == "deepseek" else "std")]
+            out["roles"]["critics"] = [role(policy, critic, CHECK_TIER.get(critic, "std"))]
         elif critic:
             out["roles"]["critics"] = [role(policy, critic, t) for t in ["heavy"] * (count - 1) + ["std"]]
         else:
@@ -155,11 +175,8 @@ def resolve(policy, project, lane, switch, now, exhausted=(), switches=0):
         out["roles"]["verifier"] = dict(tester)
 
     # 최종 리뷰: 코드를 쓴 계열과 다른 계열.
-    if cn_any:
-        chain_r = [("deepseek", "heavy")] if impl == "qwen" else [("qwen", "std")]
-    else:
-        chain_r = []
-    chain_r += [("claude", "heavy"), ("codex", "heavy")]
+    cn_reviewers = (["deepseek", "qwen"] if impl == "qwen" else ["qwen", "deepseek"]) if cn_any else []
+    chain_r = [(f, CHECK_TIER.get(f, "heavy")) for f in cn_reviewers + ["claude", "codex"]]
     pick = next(((f, t) for f, t in chain_r if f != impl and f not in exhausted), None)
     if pick:
         out["roles"]["reviewer"] = role(policy, pick[0], pick[1])
@@ -171,7 +188,27 @@ def resolve(policy, project, lane, switch, now, exhausted=(), switches=0):
             out["roles"]["reviewer"] = fallback
         else:
             out["wait"].append("review")
+    out["escalation"] = escalation(policy, impl, tier, [primary, other], out["roles"].get("reviewer"), exhausted)
     return out
+
+
+def escalation(policy, impl, tier, day_chain, reviewer, exhausted):
+    """리뷰 2회째에 올릴 구현 모델. 올릴 곳이 없으면 None이다."""
+    if tier == "heavy":
+        return None
+    if "heavy" in policy["families"][impl]["models"]:
+        return role(policy, impl, "heavy")
+    taken = {reviewer["family"]} if reviewer else set()
+    family = next((f for f in day_chain if f not in exhausted and f not in taken), None)
+    return role(policy, family, "heavy") if family else None
+
+
+def parse_exhausted(text, policy):
+    names = [x.strip() for x in text.split(",") if x.strip()]
+    unknown = [x for x in names if x not in policy["families"]]
+    if unknown:
+        raise ValueError("알 수 없는 계열: " + ", ".join(unknown))
+    return names
 
 
 def main(argv=None):
@@ -191,10 +228,10 @@ def main(argv=None):
         now = now.replace(tzinfo=KST)
     switch = args.night_roster or read_switch(policy)
     lane = args.lane or policy["default_lane"]
-    exhausted = [x for x in args.exhausted.split(",") if x]
-    unknown = [x for x in exhausted if x not in policy["families"]]
-    if unknown:
-        p.error("알 수 없는 계열: " + ", ".join(unknown))
+    try:
+        exhausted = parse_exhausted(args.exhausted, policy)
+    except ValueError as exc:
+        p.error(str(exc))
     result = resolve(policy, args.project, lane, switch, now, exhausted, args.switches)
     json.dump(result, sys.stdout, ensure_ascii=False, indent=2)
     sys.stdout.write("\n")

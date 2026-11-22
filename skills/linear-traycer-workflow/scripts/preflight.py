@@ -22,14 +22,53 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import resolve as resolver  # noqa: E402
 
 DONE_TYPES = {"completed", "canceled"}
-PREDECESSOR = re.compile(r"(?:선행|선결|blocked by|depends on|requires)[^\n]{0,40}?\b([A-Z][A-Z0-9]+-\d+)", re.I)
-CRITERIA_HEADING = re.compile(r"^\s{0,3}(?:#{1,6}\s*|\*\*)?(?:완료\s*기준|acceptance criteria|AC)\b.*$", re.I | re.M)
-LIST_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\S", re.M)
+ISSUE_ID = re.compile(r"\b([A-Za-z][A-Za-z0-9]+-\d+)\b")
+PREDECESSOR_WORD = re.compile(r"선행|선결|blocked by|depends on|requires", re.I)
+HEADING = re.compile(r"^\s{0,3}(?:#{1,6}\s+.*|\*\*[^*]+\*\*:?\s*)$")
+CRITERIA_HEADING = re.compile(r"^\s{0,3}(?:#{1,6}\s*|\*\*)?(?:완료\s*기준|acceptance criteria|AC)\b", re.I)
+LIST_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\S")
+
+
+def sections(description):
+    """(제목 줄, 본문 줄들)의 목록. 첫 제목 앞의 글은 제목이 빈 문자열이다."""
+    out = [("", [])]
+    for line in (description or "").splitlines():
+        if HEADING.match(line) or CRITERIA_HEADING.match(line):
+            out.append((line, []))
+        else:
+            out[-1][1].append(line)
+    return out
 
 
 def has_criteria(description):
-    found = CRITERIA_HEADING.search(description or "")
-    return bool(found and LIST_ITEM.search(description[found.end():]))
+    """완료 기준 제목 아래, 다음 제목 전까지에 목록 항목이 있어야 한다."""
+    return any(CRITERIA_HEADING.match(title) and any(LIST_ITEM.match(line) for line in body)
+               for title, body in sections(description))
+
+
+def predecessors(description):
+    """선행을 말하는 줄과 선행 제목 아래에 적힌 모든 이슈 식별자(대문자)."""
+    found = set()
+    for title, body in sections(description):
+        in_section = bool(PREDECESSOR_WORD.search(title))
+        for line in [title] + body:
+            if in_section or PREDECESSOR_WORD.search(line):
+                found.update(match.upper() for match in ISSUE_ID.findall(line))
+    return found
+
+
+def risky_words(text, words):
+    """ASCII 단어는 단어 단위로, 그 밖에는 부분 문자열로 찾는다."""
+    lowered = text.lower()
+    hits = []
+    for word in words:
+        key = word.lower()
+        if key.isascii():
+            if re.search(r"(?<![a-z0-9])" + re.escape(key) + r"(?![a-z0-9])", lowered):
+                hits.append(word)
+        elif key in lowered:
+            hits.append(word)
+    return hits
 
 
 def check(issue, policy):
@@ -53,8 +92,8 @@ def check(issue, policy):
     pending = [b["identifier"] for b in blockers if b.get("state_type") not in DONE_TYPES]
     if pending:
         reasons.append("선행 이슈 미완료: " + ", ".join(pending))
-    known = {b["identifier"] for b in blockers} | {issue.get("identifier")}
-    missing = sorted(set(PREDECESSOR.findall(description)) - known)
+    known = {str(b["identifier"]).upper() for b in blockers} | {str(issue.get("identifier")).upper()}
+    missing = sorted(predecessors(description) - known)
     if missing:
         reasons.append("본문의 선행 이슈가 blocks 관계로 연결되지 않음: " + ", ".join(missing))
 
@@ -68,8 +107,7 @@ def check(issue, policy):
         reasons.append("줄 라벨이 둘 이상")
     lane = lanes[0] if lanes else policy["default_lane"]
     if lane != "L":
-        text = (title + "\n" + description).lower()
-        hits = [word for word in intake["high_risk_keywords"] if word.lower() in text]
+        hits = risky_words(title + "\n" + description, intake["high_risk_keywords"])
         if hits:
             reasons.append("고위험 단어(%s)가 있는데 lane-l이 아님. 줄을 확인해야 함" % ", ".join(hits))
     return lane, reasons
@@ -86,6 +124,10 @@ def main(argv=None):
     args = p.parse_args(argv)
 
     policy = resolver.load_policy(args.policy)
+    try:
+        exhausted = resolver.parse_exhausted(args.exhausted, policy)
+    except ValueError as exc:
+        p.error(str(exc))
     issue = json.load(sys.stdin)
     lane, reasons = check(issue, policy)
     result = {"identifier": issue.get("identifier"), "ok": not reasons, "lane": lane, "reasons": reasons}
@@ -95,8 +137,7 @@ def main(argv=None):
         if now.tzinfo is None:
             now = now.replace(tzinfo=resolver.KST)
         switch = args.night_roster or resolver.read_switch(policy)
-        roster = resolver.resolve(policy, args.project, lane, switch, now,
-                                  [x for x in args.exhausted.split(",") if x], args.switches)
+        roster = resolver.resolve(policy, args.project, lane, switch, now, exhausted, args.switches)
         result["roster"] = roster
         if roster["wait"]:
             result["ok"] = False
