@@ -75,7 +75,7 @@ def has_criteria(description, headings):
         if not criteria.match(title):
             continue
         lines = under(parts, i)
-        if NUMBERED_TITLE.match(title):
+        if NUMBERED_TITLE.match(title.lstrip()):
             # "1. 완료 기준"처럼 번호로 쓴 제목이면 다음 번호 줄("2. 참고")이 다음 제목이다.
             end = next((n for n, line in enumerate(lines) if NUMBERED_TITLE.match(line)), len(lines))
             lines = lines[:end]

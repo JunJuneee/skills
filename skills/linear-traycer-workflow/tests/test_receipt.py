@@ -94,6 +94,28 @@ class ReceiptTest(unittest.TestCase):
             entry = {"role": role, "from": "codex", "to": "claude", "reason": "usage"}
             self.assertFalse(self.check(used, done(after, fallback=[entry]))[0], role)
 
+    def test_fallback_after_escalation(self):
+        r = roster(now=NIGHT)  # Qwen 구현, 올리면 Codex Sol
+        self.assertEqual((r["roles"]["implement"]["family"], r["escalation"]["family"]), ("qwen", "codex"))
+        after = roster(now=NIGHT, exhausted=["codex"])
+        self.assertEqual(after["escalation"]["model"], "opus")
+        entry = {"role": "implement", "from": "codex", "to": "claude", "reason": "usage"}
+        ok = done(after, implement={"family": "claude", "model": "opus"}, review={"rounds": 3}, fallback=[entry])
+        self.assertEqual(receipt.validate({"roster": r, "policy": POLICY}, ok, POLICY)[:2], (True, []))
+        # 올린 경로에서도 목적지는 다시 계산한 escalation이어야 한다.
+        for change in ({"to": "deepseek"}, {"from": "claude"}, {"from": "deepseek"}):
+            bad = done(after, implement={"family": "claude", "model": "opus"}, fallback=[dict(entry, **change)])
+            self.assertFalse(self.check(r, bad)[0], change)
+        # 올린 뒤에는 기본 구현 계열(Qwen)에서의 전환을 다시 주장할 수 없다.
+        twice = [entry, {"role": "implement", "from": "qwen", "to": "codex", "reason": "usage"}]
+        self.assertFalse(self.check(r, done(after, implement={"family": "claude", "model": "opus"}, fallback=twice))[0])
+        # 주간처럼 올릴 모델이 같은 계열이면 일반 전환과 같다.
+        day, moved = roster(), roster(exhausted=["codex"])
+        up = moved["escalation"]
+        plain = {"role": "implement", "from": "codex", "to": "claude", "reason": "usage"}
+        self.assertTrue(self.check(day, done(moved, implement={"family": up["family"], "model": up["model"]},
+                                             fallback=[plain]))[0])
+
     def test_reviewer_fallback(self):
         r = roster()  # 리뷰어 Qwen
         after = roster(exhausted=["qwen"])
@@ -258,6 +280,10 @@ class FromLinearTest(unittest.TestCase):
     def test_numbered_plain_heading_ends_at_the_next_number(self):
         self.assertTrue(self.reasons(description="1. 완료 기준\n\n2. 참고 자료\n- https://example.com/spec\n")[1])
         self.assertEqual(self.reasons(description="1. 완료 기준\n- 저장된다\n2. 참고 자료\n")[1], [])
+        for indent in (" ", "  ", "   "):
+            empty = indent + "1. 완료 기준\n\n2. 참고 자료\n- https://example.com/spec\n"
+            self.assertTrue(self.reasons(description=empty)[1], repr(indent))
+            self.assertEqual(self.reasons(description=indent + "1. 완료 기준\n- 저장된다\n")[1], [])
         self.assertEqual(self.reasons(description="## 완료 기준\n1. 저장된다\n2. 복원된다\n")[1], [])
 
     def test_numbered_criteria_heading(self):

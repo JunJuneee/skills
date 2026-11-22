@@ -48,7 +48,13 @@ def replay(roster, fallback, policy):
         return resolver.resolve(policy, roster["project"], roster["lane"], roster["night_roster"], now,
                                 resolver.parse_exhausted(",".join(exhausted), policy), switches)
 
+    def implement_family(result, escalated):
+        """구현이 실제로 돌고 있는 계열. 리뷰 2회째에 올렸으면 escalation 쪽이다."""
+        up = result.get("escalation")
+        return up["family"] if escalated and up else family_of(result, "implement")
+
     current = compute()
+    escalated = False
     for index, entry in enumerate(fallback, 1):
         if not isinstance(entry, dict):
             raise Mismatch("fallback %d번이 객체가 아님" % index)
@@ -57,17 +63,25 @@ def replay(roster, fallback, policy):
             raise Mismatch("fallback %d번의 role 또는 reason이 올바르지 않음" % index)
         if source not in policy["families"] or target not in policy["families"]:
             raise Mismatch("fallback %d번의 계열을 알 수 없음" % index)
-        if family_of(current, role) != source:
+        if role == "implement":
+            # 배정된 구현 계열이 아니면, 올린 모델(escalation)에서 소진된 경우만 인정한다.
+            if source != implement_family(current, escalated):
+                up = current.get("escalation")
+                if escalated or not up or up["family"] != source:
+                    raise Mismatch("fallback %d번: 그 시점의 implement 배정은 %s가 아님" % (index, source))
+                escalated = True
+        elif family_of(current, role) != source:
             raise Mismatch("fallback %d번: 그 시점의 %s 배정은 %s가 아님" % (index, role, source))
-        before = family_of(current, "implement")
+        before = implement_family(current, escalated)
         if source not in exhausted:
             exhausted.append(source)
         if role == "implement":
             switches += 1
         current = compute()
-        if role != "implement" and family_of(current, "implement") != before:
+        after = implement_family(current, escalated) if role == "implement" else family_of(current, role)
+        if role != "implement" and implement_family(current, escalated) != before:
             raise Mismatch("fallback %d번: 구현 계열이 바뀌는데 구현 전환으로 기록하지 않음" % index)
-        if family_of(current, role) != target:
+        if after != target:
             raise Mismatch("fallback %d번: 다시 계산한 %s 배정은 %s가 아님" % (index, role, target))
     return current
 
