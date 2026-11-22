@@ -26,11 +26,19 @@ Claude·Codex 공용 본문은 `skills/agent-workflow/SKILL.md` 한곳에서 관
 
 ## Linear 이슈의 Traycer 실행
 
-[`linear-traycer-workflow`](skills/linear-traycer-workflow/SKILL.md)는 Linear 이슈를 Traycer에서 실행할 때 쓰는 구체적인 작업 흐름입니다. 구현 모델의 반대 계열 5명이 계획 critique합니다(Codex 구현 → Claude, Claude 구현 → Codex). 조율자가 필요한 내용을 반영하고 지정한 구현 계열의 작업자들이 구현·TC·테스트를 맡으며, 조율자 한 명이 PR 게시와 외부 갱신을 담당합니다. 별도 Opus가 코드 리뷰하고 그 결과를 조율자가 PR에 남기며 수정·검증·재리뷰를 반복합니다. 실제 진행에 따라 Linear 상태를 갱신하고, 병합·배포는 현재 승인 범위를 따릅니다. 계획 후 재승인 단계는 없습니다. 제이지 봇으로 프로젝트 채널에 시작 설명·Linear 링크를 남기고 같은 스레드에 진행과 완료 PR·요청자 멘션을 이어갑니다. 최종 수정·리뷰와 원격 보존을 확인한 뒤 작업 소유 worktree를 정리합니다. 환경변수와 제이지 토큰은 Doppler `jay/shared`에서 우선 찾고 필요한 프로세스에만 주입합니다.
+[`linear-traycer-workflow`](skills/linear-traycer-workflow/SKILL.md)는 Linear 이슈를 Traycer에서 실행할 때 쓰는 구체적인 작업 흐름입니다. 사전 점검을 통과한 이슈를 줄(S·M·L)에 따라 처리합니다. S는 critique 없이, M은 다른 계열 1명, L은 다른 계열 3명의 계획 critique와 사람의 계획 승인을 거칩니다. 구현 세션이 테스트를 함께 작성하고, 원격 head를 깨끗한 체크아웃에서 실제로 돌린 결과를 검증 증거로 삼으며, 코드를 쓴 계열과 다른 계열의 리뷰어가 정해진 횟수 안에서 리뷰·재리뷰합니다. 조율자 한 명이 PR 게시와 외부 갱신을 담당하고, 병합·배포는 현재 승인 범위를 따릅니다.
 
-> $linear-traycer-workflow를 사용해서 지정한 Linear 이슈를 구현하고, 필수 TC·테스트와 Opus 리뷰를 마친 PR까지 만들어줘.
+역할별 모델은 본문에 적지 않고 [`policy.json`](skills/linear-traycer-workflow/policy.json)과 `scripts/resolve.py`가 정합니다. 야간 중국 모델은 `~/.traycer/night-roster.sh on|off|auto` 하나로 켜고 끄며, Claude·Codex 사용량이 소진되면 정해진 순서로 같은 등급의 다른 계열로 전환합니다.
 
-이 스킬은 기존 `agent-workflow`를 대체하거나 감시 실행기를 설치하지 않습니다. 역할별 모델·하위 위임은 [모델 계약](skills/linear-traycer-workflow/references/models-and-delegation.md), TC·PR 댓글·Linear 상태 전환은 [검증과 진행 기록](skills/linear-traycer-workflow/references/evidence-and-linear.md)을 따릅니다.
+```bash
+python3 skills/linear-traycer-workflow/scripts/resolve.py --project seoulseeing --lane M
+python3 skills/linear-traycer-workflow/scripts/preflight.py --project seoulseeing < issue.json
+python3 -m unittest discover -s skills/linear-traycer-workflow/tests
+```
+
+> $linear-traycer-workflow를 사용해서 지정한 Linear 이슈를 구현하고, 테스트·실행 검증·최종 리뷰를 마친 PR까지 만들어줘.
+
+이 스킬은 기존 `agent-workflow`를 대체하거나 감시 실행기를 설치하지 않습니다. 인입 규칙은 [인입과 줄](skills/linear-traycer-workflow/references/intake.md), 모델 계산·독립성·전환은 [모델 계약](skills/linear-traycer-workflow/references/models-and-delegation.md), TC·PR 댓글·Linear 상태 전환은 [검증과 진행 기록](skills/linear-traycer-workflow/references/evidence-and-linear.md)을 따릅니다. 야간 전용 스킬(`night-chinese-coding`)은 이 정책으로 합쳐져 삭제됐습니다.
 
 같은 작업의 후속 PR 리뷰에도 기존 수정·검증·재리뷰 계약을 이어받습니다. 유효한 지적이 오면 실제 수정 작업으로 연결하며, 비동기 응답을 기다리는 턴 종료와 사용자 결정 대기를 구분합니다. PR-only와 병합 승인, 명시적 리뷰 전용·사용자 hold는 각각 유지합니다. 상세 기준은 [리뷰 반복과 재개](skills/linear-traycer-workflow/references/review-loop.md)를 따릅니다.
 
