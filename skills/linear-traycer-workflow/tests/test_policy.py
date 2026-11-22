@@ -240,10 +240,36 @@ class PreflightTest(unittest.TestCase):
         self.assertTrue(self.reasons(description="## 완료 기준\n없음")[1])
         self.assertTrue(self.reasons(repo=None)[1])
 
-    def test_high_risk_word_needs_lane_l(self):
+    def test_high_risk_word_needs_an_explicit_lane(self):
         body = "DB 마이그레이션 포함\n## 완료 기준\n- 적용된다\n"
         self.assertTrue(self.reasons(description=body)[1])
         self.assertEqual(self.reasons(description=body, labels=["lane-l"]), ("L", []))
+        # 사람이 줄을 직접 정했으면 단어로 다시 막지 않는다.
+        self.assertEqual(self.reasons(description=body, labels=["lane-m"]), ("M", []))
+        self.assertEqual(self.reasons(description=body, labels=["Lane-S"]), ("S", []))
+
+    def test_issue_ids_before_the_predecessor_word_are_references(self):
+        listing = ("* JAY-370 복합 챗, JAY-371/373 derma 연결의 현재 계약·선행·소유를 확인한다.\n"
+                   "## 완료 기준\n- 조사 결과가 있다\n")
+        self.assertEqual(self.reasons(description=listing)[1], [])
+        real = "JAY-1 explicitly requires predecessor JAY-558.\n## 완료 기준\n- 재계산된다\n"
+        self.assertTrue(any("JAY-558" in r for r in self.reasons(description=real)[1]))
+        titled = "## 선행: JAY-7\n내용\n## 완료 기준\n- 된다\n"
+        self.assertTrue(any("JAY-7" in r for r in self.reasons(description=titled)[1]))
+
+    def test_fully_checked_criteria_mean_nothing_is_left(self):
+        done = "## 완료 기준 및 검증 (변경)\n\n- [X] 설정했다.\n- [x] 수신을 확인했다.\n"
+        self.assertTrue(any("모두 체크" in r for r in self.reasons(description=done)[1]))
+        partial = "## 완료 기준\n- [x] 설정했다.\n- [ ] 수신을 확인한다.\n"
+        self.assertEqual(self.reasons(description=partial)[1], [])
+        plain = "## 완료 기준\n- [x] 설정했다.\n- 수신을 확인한다.\n"
+        self.assertEqual(self.reasons(description=plain)[1], [])
+        # 목록 기호가 섞여 있어도 체크되지 않은 항목을 놓치지 않는다.
+        mixed = "## 완료 기준\n- [x] 저장했다\n+ [ ] 재시작 후 복원된다\n"
+        self.assertEqual(self.reasons(description=mixed)[1], [])
+        plus = "## 완료 기준\n+ [x] 저장했다\n+ [X] 복원된다\n"
+        self.assertTrue(any("모두 체크" in r for r in self.reasons(description=plus)[1]))
+        self.assertEqual(self.reasons(description="## 완료 기준\n+ 저장된다\n")[1], [])
 
 
     def test_every_predecessor_on_the_line_is_checked(self):

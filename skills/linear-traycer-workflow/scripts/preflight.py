@@ -33,7 +33,7 @@ def criteria_pattern(headings):
     return re.compile(r"^\s{0,3}(?:#{1,6}\s*|\*\*)?(?:\d+[.)]\s*)?(?:" + words + r")(?!\w)", re.I)
 
 NUMBERED_TITLE = re.compile(r"^\d+[.)]\s+\S")
-LIST_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\S")
+LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\S")
 
 
 def level(line):
@@ -67,10 +67,17 @@ def under(parts, index):
     return lines
 
 
-def has_criteria(description, headings):
-    """완료 기준 제목 아래(하위 제목 포함)에 목록 항목이 있어야 한다."""
+CHECKED_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\[[xX]\]\s")
+
+
+def criteria_state(description, headings):
+    """완료 기준 제목 아래(하위 제목 포함)의 목록 상태.
+
+    "missing"은 목록이 없음, "done"은 모든 항목이 체크된 체크박스라 남은 일이 없음, "open"은 할 일이 있음이다.
+    """
     criteria = criteria_pattern(headings)
     parts = sections(description, criteria)
+    items = []
     for i, (_, title, _) in enumerate(parts):
         if not criteria.match(title):
             continue
@@ -79,23 +86,34 @@ def has_criteria(description, headings):
             # "1. 완료 기준"처럼 번호로 쓴 제목이면 다음 번호 줄("2. 참고")이 다음 제목이다.
             end = next((n for n, line in enumerate(lines) if NUMBERED_TITLE.match(line)), len(lines))
             lines = lines[:end]
-        if any(LIST_ITEM.match(line) for line in lines):
-            return True
-    return False
+        items += [line for line in lines if LIST_ITEM.match(line)]
+    if not items:
+        return "missing"
+    return "done" if all(CHECKED_ITEM.match(line) for line in items) else "open"
 
 
 def predecessors(description, headings=()):
-    """선행을 말하는 줄과 선행 제목 아래(하위 제목 포함)에 적힌 모든 이슈 식별자(대문자).
+    """선행으로 선언된 이슈 식별자(대문자).
 
+    선행 제목 아래(하위 제목 포함)에 적힌 식별자는 모두, 그 밖의 줄에서는 선행을 뜻하는 말 뒤에
+    나오는 식별자만 센다. "JAY-1, JAY-2의 계약·선행을 확인한다"처럼 앞에 나열된 것은 참조로 본다.
     완료 기준 제목에서 선행 섹션이 끝나도록 같은 제목 규칙으로 나눈다.
     """
     parts = sections(description, criteria_pattern(headings) if headings else None)
-    lines = []
+    found = set()
+
+    def after_word(line):
+        word = PREDECESSOR_WORD.search(line)
+        return ISSUE_ID.findall(line[word.end():]) if word else []
+
     for i, (_, title, body) in enumerate(parts):
         if PREDECESSOR_WORD.search(title):
-            lines += [title] + under(parts, i)
-        lines += [line for line in body if PREDECESSOR_WORD.search(line)]
-    return {match.upper() for line in lines for match in ISSUE_ID.findall(line)}
+            found.update(after_word(title))
+            for line in under(parts, i):
+                found.update(ISSUE_ID.findall(line))
+        for line in body:
+            found.update(after_word(line))
+    return {match.upper() for match in found}
 
 
 def risky_words(text, words):
@@ -169,8 +187,11 @@ def check(issue, policy, project=None):
     if missing:
         reasons.append("본문의 선행 이슈가 blocks 관계로 연결되지 않음: " + ", ".join(missing))
 
-    if not has_criteria(description, intake["criteria_headings"]):
+    state = criteria_state(description, intake["criteria_headings"])
+    if state == "missing":
         reasons.append("완료 기준을 찾을 수 없음")
+    elif state == "done":
+        reasons.append("완료 기준이 모두 체크돼 있어 남은 작업이 없음")
     if not issue.get("repo"):
         reasons.append("대상 저장소가 하나로 정해지지 않음")
 
@@ -178,10 +199,11 @@ def check(issue, policy, project=None):
     if len(set(lanes)) > 1:
         reasons.append("줄 라벨이 둘 이상")
     lane = lanes[0] if lanes else policy["default_lane"]
-    if lane != "L":
+    # 사람이 줄 라벨을 직접 붙였으면 그 판단을 따른다. 라벨이 없을 때만 단어로 확인을 요청한다.
+    if not lanes:
         hits = risky_words(title + "\n" + description, intake["high_risk_keywords"])
         if hits:
-            reasons.append("고위험 단어(%s)가 있는데 lane-l이 아님. 줄을 확인해야 함" % ", ".join(hits))
+            reasons.append("고위험 단어(%s)가 있는데 줄 라벨이 없음. lane-s·lane-m·lane-l 중 하나로 확인해야 함" % ", ".join(hits))
     return lane, reasons
 
 
