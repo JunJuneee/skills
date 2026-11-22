@@ -1,18 +1,21 @@
 ---
 name: wiki
-description: 개인 맥락 위키(~/wiki, 로컬 git)를 다룬다. init으로 work·personal 폴더와 규약을 만들고, absorb로 내가 쓴 프롬프트·memory·handoff·inbox 노트를 격리된 하위 프로세스에서 페이지로 반영하며, note로 도메인을 정해 메모를 넣고, query로 찾는다. status로 상태를 보고, schedule로 하루 한 번 자동 실행(launchd)과 Slack 한 줄 알림을 켠다. "/wiki init", "/wiki absorb", "/wiki note", "/wiki query", "/wiki status", "/wiki schedule", "위키 초기화", "위키에 반영", "위키에 메모", "위키에서 찾아줘", "위키 상태", "위키 자동 실행 설치" 같은 요청에 사용.
+description: 개인 맥락 위키를 다룬다. init으로 work·personal 폴더와 규약을 만들고, absorb로 내가 쓴 프롬프트·memory·handoff·inbox 노트를 격리된 하위 프로세스에서 페이지로 반영하며, note로 도메인을 정해 메모를 넣고, query로 찾는다. status로 상태를 보고, schedule로 하루 한 번 자동 실행(launchd)과 Slack 한 줄 알림을 켠다. "/wiki init", "/wiki absorb", "/wiki note", "/wiki query", "/wiki status", "/wiki schedule", "위키 초기화", "위키에 반영", "위키에 메모", "위키에서 찾아줘", "위키 상태", "위키 자동 실행 설치" 같은 요청에 사용.
 ---
 
 # Wiki
 
 `SKILL.md`가 있는 디렉터리를 `SKILL_DIR`로 쓴다. 모든 명령은 같은 진입점 하나로 실행한다. Claude Code에서는 `/wiki <명령>`, Codex에서는 `$wiki`로 부르며 실행 방법은 같다.
 
+이 컴퓨터의 기본 위키는 GitHub 클론 `/Users/saladlab/Desktop/github/llm-wiki`다. 사용자가 다른 위치를 지정하지 않으면 각 명령을 실행하는 셸에서 `WIKI_ROOT=/Users/saladlab/Desktop/github/llm-wiki`를 설정한다. 예약 작업도 이 클론을 사용한다. `~/wiki`는 이전 위키이므로 기본 대상으로 쓰지 않는다.
+
 ```bash
 SKILL_DIR='<이 SKILL.md가 있는 디렉터리>'
+export WIKI_ROOT='/Users/saladlab/Desktop/github/llm-wiki'
 python3 "$SKILL_DIR/scripts/wiki.py" <명령> [옵션]
 ```
 
-- 위키 위치는 `--root`, 없으면 환경변수 `WIKI_ROOT`, 없으면 `~/wiki`. 빈 값은 없는 것으로 본다.
+- 스크립트의 위치 우선순위는 `--root`, 환경변수 `WIKI_ROOT`, `~/wiki`다. 빈 값은 없는 것으로 본다. 위의 기본 경로를 각 셸에서 설정하고, 다른 위키를 명시적으로 요청한 경우에만 `--root`로 지정한다.
 - `--json`을 붙이면 결과를 JSON 한 개로 받는다. 실패하면 `reason` 코드가 있다.
 - `absorb`가 세션에 보여 주는 것(글, `--json` 모두)은 상태, 사유 코드, 숫자뿐이다. 페이지 경로·원본 id·경고의 세부는 `<위키>/.state/last-report.json`(0600)에만 쓴다. `--verbose`는 전체를 보여 주므로 공유 세션이나 공개 레포 세션에서 쓰지 않는다.
 - Python 3.9 표준 라이브러리만 쓴다. `/usr/bin/python3`로도 돈다.

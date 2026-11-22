@@ -1,0 +1,63 @@
+{
+  "version": 1,
+  "night": {
+    "switch_file": "~/.traycer/night-roster.env",
+    "window_kst": [23, 9]
+  },
+  "projects": {
+    "seoulseeing": {"primary": "codex", "cn_allowed": true, "stop_at": "in_review"},
+    "homeshopick": {"primary": "codex", "cn_allowed": true, "stop_at": "pr"},
+    "coo": {"primary": "codex", "cn_allowed": true, "stop_at": "in_review"},
+    "core-ser": {"primary": "claude", "cn_allowed": true, "stop_at": "in_review"},
+    "skills": {"primary": "codex", "cn_allowed": true, "stop_at": "in_review"}
+  },
+  "default_project": {"primary": "codex", "cn_allowed": true, "stop_at": "in_review"},
+  "families": {
+    "claude": {
+      "harness": "claude",
+      "expect_version": "5.5",
+      "models": {"light": "haiku", "std": "sonnet", "heavy": "opus"}
+    },
+    "codex": {
+      "harness": "codex",
+      "models": {"light": "gpt-6-luna", "std": "gpt-6.1-terra", "heavy": "gpt-6.1-sol"}
+    },
+    "qwen": {
+      "harness": "qwen",
+      "cn": true,
+      "models": {"std": "qwen4-max-preview(openai)"}
+    },
+    "deepseek": {
+      "harness": "qwen",
+      "cn": true,
+      "models": {
+        "light": "deepseek-v4.1-flash(openai)",
+        "std": "deepseek-v4-pro(openai)",
+        "heavy": "deepseek-v4-pro-0813(openai)"
+      }
+    }
+  },
+  "effort": {"light": "medium", "std": "high", "heavy": "xhigh"},
+  "lanes": {
+    "S": {"implement_tier": "std", "critics": 0, "separate_tests": false, "review_rounds": 1, "token_cap": 30000000, "plan_approval": false, "cn_implement": true},
+    "M": {"implement_tier": "std", "critics": 1, "separate_tests": false, "review_rounds": 3, "token_cap": 200000000, "plan_approval": false, "cn_implement": true},
+    "L": {"implement_tier": "heavy", "critics": 3, "separate_tests": true, "review_rounds": 3, "token_cap": 600000000, "plan_approval": true, "cn_implement": false}
+  },
+  "default_lane": "M",
+  "test_roles": {
+    "claude": {"tier": "std", "effort": "medium"},
+    "codex": {"tier": "light", "effort": "high"},
+    "qwen": {"family": "deepseek", "tier": "light"},
+    "deepseek": {"tier": "light"}
+  },
+  "review": {"escalate_implementer_at_round": 2},
+  "fallback": {"max_switches_per_issue": 2, "notify_after_wait_hours": 6},
+  "session_context_cap": 200000,
+  "intake": {
+    "ready_state": "Todo",
+    "control_labels": ["owner-action", "needs-confirm", "agent-hold", "hold", "blocked", "agent-running"],
+    "lane_labels": {"lane-s": "S", "lane-m": "M", "lane-l": "L"},
+    "high_risk_keywords": ["마이그레이션", "migration", "인증", "권한", "auth", "authentication", "authorization", "oauth", "결제", "payment", "billing", "데이터 삭제", "drop table"],
+    "slot_timeout_hours": 24
+  }
+}
