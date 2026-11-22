@@ -194,7 +194,8 @@ def resolve(policy, project, lane, switch, now, exhausted=(), switches=0):
 
 def escalation(policy, impl, tier, day_chain, reviewer, exhausted):
     """리뷰 2회째에 올릴 구현 모델. 올릴 곳이 없으면 None이다."""
-    if tier == "heavy":
+    # 같은 계열 리뷰어는 구현보다 높은 등급이어야 하므로, 그 경우에는 구현을 올리지 않는다.
+    if tier == "heavy" or (reviewer and reviewer.get("same_family")):
         return None
     if "heavy" in policy["families"][impl]["models"]:
         return role(policy, impl, "heavy")

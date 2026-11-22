@@ -29,32 +29,50 @@ CRITERIA_HEADING = re.compile(r"^\s{0,3}(?:#{1,6}\s*|\*\*)?(?:완료\s*기준|ac
 LIST_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\S")
 
 
+def level(line):
+    """제목 줄의 깊이. # 개수이고, 굵은 글씨나 표식 없는 제목은 가장 깊은 7이다."""
+    hashes = re.match(r"\s{0,3}(#{1,6})\s", line)
+    return len(hashes.group(1)) if hashes else 7
+
+
 def sections(description):
-    """(제목 줄, 본문 줄들)의 목록. 첫 제목 앞의 글은 제목이 빈 문자열이다."""
-    out = [("", [])]
+    """(깊이, 제목 줄, 그 제목 바로 아래 줄들)의 목록. 첫 제목 앞의 글은 깊이 0이다."""
+    out = [(0, "", [])]
     for line in (description or "").splitlines():
         if HEADING.match(line) or CRITERIA_HEADING.match(line):
-            out.append((line, []))
+            out.append((level(line), line, []))
         else:
-            out[-1][1].append(line)
+            out[-1][2].append(line)
     return out
 
 
+def under(parts, index):
+    """index번 제목에 속한 모든 줄. 같은 깊이나 상위 제목이 나오면 끝나고 하위 제목의 글은 포함한다."""
+    depth = parts[index][0]
+    lines = list(parts[index][2])
+    for deeper, title, body in parts[index + 1:]:
+        if deeper <= depth:
+            break
+        lines += [title] + body
+    return lines
+
+
 def has_criteria(description):
-    """완료 기준 제목 아래, 다음 제목 전까지에 목록 항목이 있어야 한다."""
-    return any(CRITERIA_HEADING.match(title) and any(LIST_ITEM.match(line) for line in body)
-               for title, body in sections(description))
+    """완료 기준 제목 아래(하위 제목 포함)에 목록 항목이 있어야 한다."""
+    parts = sections(description)
+    return any(CRITERIA_HEADING.match(title) and any(LIST_ITEM.match(line) for line in under(parts, i))
+               for i, (_, title, _) in enumerate(parts))
 
 
 def predecessors(description):
-    """선행을 말하는 줄과 선행 제목 아래에 적힌 모든 이슈 식별자(대문자)."""
-    found = set()
-    for title, body in sections(description):
-        in_section = bool(PREDECESSOR_WORD.search(title))
-        for line in [title] + body:
-            if in_section or PREDECESSOR_WORD.search(line):
-                found.update(match.upper() for match in ISSUE_ID.findall(line))
-    return found
+    """선행을 말하는 줄과 선행 제목 아래(하위 제목 포함)에 적힌 모든 이슈 식별자(대문자)."""
+    parts = sections(description)
+    lines = []
+    for i, (_, title, body) in enumerate(parts):
+        if PREDECESSOR_WORD.search(title):
+            lines += [title] + under(parts, i)
+        lines += [line for line in body if PREDECESSOR_WORD.search(line)]
+    return {match.upper() for line in lines for match in ISSUE_ID.findall(line)}
 
 
 def risky_words(text, words):
@@ -64,7 +82,8 @@ def risky_words(text, words):
     for word in words:
         key = word.lower()
         if key.isascii():
-            if re.search(r"(?<![a-z0-9])" + re.escape(key) + r"(?![a-z0-9])", lowered):
+            # 뒤에 붙는 숫자는 허용한다(OAuth2). author처럼 글자가 이어지면 다른 단어다.
+            if re.search(r"(?<![a-z0-9])" + re.escape(key) + r"(?![a-z])", lowered):
                 hits.append(word)
         elif key in lowered:
             hits.append(word)

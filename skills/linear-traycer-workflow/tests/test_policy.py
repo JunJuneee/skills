@@ -143,6 +143,19 @@ class ResolveTest(unittest.TestCase):
         self.assertNotEqual(night["escalation"]["family"], night["roles"]["reviewer"]["family"])
         self.assertIsNone(run(lane="L")["escalation"])
 
+    def test_no_escalation_into_the_same_family_reviewer(self):
+        result = run(switch="off", exhausted=["claude"])
+        self.assertTrue(result["roles"]["reviewer"]["same_family"])
+        self.assertIsNone(result["escalation"])
+        for exhausted in ([], ["claude"], ["codex"], ["qwen"], ["claude", "qwen"], ["codex", "deepseek"]):
+            for switch in ("auto", "on", "off"):
+                for now in (DAY, NIGHT):
+                    for lane in ("S", "M"):
+                        result = run(lane=lane, switch=switch, now=now, exhausted=exhausted)
+                        up, reviewer = result.get("escalation"), result["roles"].get("reviewer")
+                        if up and reviewer:
+                            self.assertNotEqual(up["family"], reviewer["family"], (exhausted, switch, lane))
+
     def test_switch_file_parsing(self):
         parse = resolve.parse_switch
         self.assertEqual(parse("export NIGHT_ROSTER=off\n"), "off")
@@ -256,7 +269,22 @@ class PreflightTest(unittest.TestCase):
         self.assertEqual(self.reasons(description="**완료 기준**\n1. 저장된다\n")[1], [])
         self.assertEqual(self.reasons(description="완료 기준:\n- 저장된다\n")[1], [])
 
+    def test_subheadings_belong_to_their_parent_section(self):
+        body = "## 완료 기준\n### 정상 동작\n- 입력이 보존된다\n### 오류 처리\n- 안내가 표시된다\n"
+        self.assertEqual(self.reasons(description=body)[1], [])
+        self.assertEqual(self.reasons(description="## 완료 기준\n**정상 동작**\n- 입력이 보존된다\n")[1], [])
+        nested = "## 선행 이슈\n### 공통 작업\n- JAY-100\n## 완료 기준\n- 입력 보존\n"
+        self.assertTrue(any("JAY-100" in r for r in self.reasons(description=nested)[1]))
+        # 상위 제목이 다시 나오면 섹션이 끝난다.
+        ended = "### 완료 기준\n## 참고\n- 링크\n"
+        self.assertTrue(any("완료 기준" in r for r in self.reasons(description=ended)[1]))
+        after = "## 선행 이슈\n없음\n## 참고\n- JAY-100 과 비슷함\n## 완료 기준\n- 입력 보존\n"
+        self.assertEqual(self.reasons(description=after)[1], [])
+
     def test_high_risk_words_match_whole_ascii_words(self):
+        self.assertTrue(self.reasons(title="OAuth2 access token 검증 로직 교체")[1])
+        self.assertTrue(self.reasons(title="OAuth2.0 전환")[1])
+        self.assertEqual(self.reasons(title="authors 목록 정렬")[1], [])
         self.assertEqual(self.reasons(title="게시물 author 필드에 작성자 이름 표시")[1], [])
         self.assertTrue(self.reasons(title="OAuth 토큰 갱신")[1])
         self.assertTrue(self.reasons(title="auth 미들웨어 교체")[1])
