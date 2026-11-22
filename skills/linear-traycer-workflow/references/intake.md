@@ -78,7 +78,7 @@ python3 scripts/preflight.py --project core-ser --from-linear --repo SaladLabInc
             "verified_from_transcript": true, "rounds": 2, "unresolved_valid_findings": 0}}
 ```
 
-실행 도중 사용량이 소진돼 계열을 바꿨으면 순서대로 `fallback`에 적고, `implement`·`review`에는 바꾼 뒤 실제로 수행한 계열과 모델을 적는다. `role`은 `implement`·`reviewer`·`critic`, `reason`은 `usage`다.
+실행 도중 모델이 바뀌었으면 일어난 순서대로 `fallback`에 적고, `implement`·`review`에는 마지막에 실제로 수행한 계열과 모델을 적는다. `role`은 `implement`·`reviewer`·`critic`이다. `reason`은 사용량 소진이면 `usage`, 리뷰 2회째에 구현 모델을 `roster.escalation`으로 올렸으면 `escalation`이다(구현만, 한 번만).
 
 ```json
 {"implement": {"family": "claude", "model": "sonnet", "session_id": "..."},
@@ -91,9 +91,9 @@ python3 scripts/receipt.py validate --manifest manifest.json --receipt receipt.j
 
 | 대조 | 통과 조건 |
 | --- | --- |
-| 구현 모델 | 배정된 모델이거나 `roster.escalation`의 모델 |
+| 구현 모델 | 전환 기록을 따라간 끝의 모델과 정확히 같음. 기록이 없으면 배정된 모델. 올린 모델은 `escalation` 기록이 있고 리뷰가 2회 이상일 때만 인정 |
 | 리뷰 모델 | 배정된 리뷰어와 같음 |
-| 전환 | `fallback`을 순서대로 다시 계산한다. 각 기록의 `from`이 그 시점의 배정이고 `to`가 다시 계산한 배정이어야 하며, 구현 전환 횟수는 상한에 포함된다 |
+| 전환 | `fallback`을 순서대로 다시 계산한다. 각 기록의 `from`이 그 시점에 실제로 돌던 계열이고 `to`가 다시 계산한 배정이어야 한다. 사용량 전환 횟수는 상한에 포함된다. 올린 뒤의 구현 전환은 다시 계산한 상향 대상으로만 갈 수 있고, 갈 곳이 없으면 완료가 아니라 대기다 |
 | 같은 계열 리뷰 | 배정이 `same_family`를 허용했고 영수증에도 `same_family: true`가 있음 |
 | 실행 모델 확인 | `verified_from_transcript`가 참. Claude 별칭만 확인됐으면 `alias_only: true`를 적으며 최종 줄이 L이 아닐 때만 인정 |
 | 리뷰 세션 | 구현 세션과 다른 `session_id` |

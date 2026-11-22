@@ -60,11 +60,22 @@ class ReceiptTest(unittest.TestCase):
         ok, why, _ = self.check(r, done(r, review={"family": "codex", "model": "gpt-6.1-sol"}))
         self.assertTrue(any("같은 계열" in x for x in why))
 
-    def test_escalated_implementer_is_accepted_but_other_models_are_not(self):
+    def test_escalation_must_be_recorded(self):
         r = roster()
         up = r["escalation"]
-        self.assertTrue(self.check(r, done(r, implement={"family": up["family"], "model": up["model"]}))[0])
+        raised = {"family": up["family"], "model": up["model"]}
+        record = {"role": "implement", "from": "codex", "to": "codex", "reason": "escalation"}
+        self.assertTrue(self.check(r, done(r, implement=raised, review={"rounds": 2}, fallback=[record]))[0])
+        # 기록 없이 올린 모델을 쓰거나, 기록하고도 원래 모델을 쓰면 거부한다.
+        self.assertFalse(self.check(r, done(r, implement=raised, review={"rounds": 2}))[0])
+        self.assertFalse(self.check(r, done(r, review={"rounds": 2}, fallback=[record]))[0])
+        # 상향은 리뷰 2회째부터이고 한 번뿐이다.
+        self.assertFalse(self.check(r, done(r, implement=raised, review={"rounds": 1}, fallback=[record]))[0])
+        self.assertFalse(self.check(r, done(r, implement=raised, review={"rounds": 2}, fallback=[record, record]))[0])
         self.assertFalse(self.check(r, done(r, implement={"model": "gpt-6-luna"}))[0])
+        # 올릴 곳이 없는 L 줄은 상향을 기록할 수 없다.
+        high = roster(lane="L")
+        self.assertFalse(self.check(high, done(high, review={"rounds": 2}, fallback=[record]))[0])
 
     def test_fallback_is_recomputed(self):
         r = roster()  # Codex 구현 배정
@@ -99,22 +110,40 @@ class ReceiptTest(unittest.TestCase):
         self.assertEqual((r["roles"]["implement"]["family"], r["escalation"]["family"]), ("qwen", "codex"))
         after = roster(now=NIGHT, exhausted=["codex"])
         self.assertEqual(after["escalation"]["model"], "opus")
-        entry = {"role": "implement", "from": "codex", "to": "claude", "reason": "usage"}
-        ok = done(after, implement={"family": "claude", "model": "opus"}, review={"rounds": 3}, fallback=[entry])
+        up = {"role": "implement", "from": "qwen", "to": "codex", "reason": "escalation"}
+        out = {"role": "implement", "from": "codex", "to": "claude", "reason": "usage"}
+        opus = {"family": "claude", "model": "opus"}
+        ok = done(after, implement=opus, review={"rounds": 3}, fallback=[up, out])
         self.assertEqual(receipt.validate({"roster": r, "policy": POLICY}, ok, POLICY)[:2], (True, []))
-        # 올린 경로에서도 목적지는 다시 계산한 escalation이어야 한다.
-        for change in ({"to": "deepseek"}, {"from": "claude"}, {"from": "deepseek"}):
-            bad = done(after, implement={"family": "claude", "model": "opus"}, fallback=[dict(entry, **change)])
+        # 올린 기록 없이 올린 모델의 소진을 주장할 수 없다.
+        self.assertFalse(self.check(r, done(after, implement=opus, review={"rounds": 3}, fallback=[out]))[0])
+        # 올린 경로로 Claude에 도착했는데 원래 Qwen으로 구현했다고 적으면 거부한다.
+        self.assertFalse(self.check(r, done(after, review={"rounds": 3}, fallback=[up, out]))[0])
+        # 목적지와 출발지는 다시 계산한 상향 대상과 맞아야 한다.
+        for change in ({"to": "deepseek"}, {"from": "claude"}, {"from": "qwen"}):
+            bad = done(after, implement=opus, review={"rounds": 3}, fallback=[up, dict(out, **change)])
             self.assertFalse(self.check(r, bad)[0], change)
-        # 올린 뒤에는 기본 구현 계열(Qwen)에서의 전환을 다시 주장할 수 없다.
-        twice = [entry, {"role": "implement", "from": "qwen", "to": "codex", "reason": "usage"}]
-        self.assertFalse(self.check(r, done(after, implement={"family": "claude", "model": "opus"}, fallback=twice))[0])
-        # 주간처럼 올릴 모델이 같은 계열이면 일반 전환과 같다.
+        # 올릴 곳이 사라지면 기본 구현으로 돌아가지 않고 대기해야 한다.
+        back = {"role": "implement", "from": "claude", "to": "qwen", "reason": "usage"}
+        gone = done(after, review={"rounds": 3}, fallback=[up, out, back])
+        ok, why, _ = self.check(r, gone)
+        self.assertTrue(not ok and "대기" in why[0])
+        # 올린 뒤에는 기본 구현 계열에서의 전환을 다시 주장할 수 없다.
+        again = {"role": "implement", "from": "qwen", "to": "codex", "reason": "usage"}
+        self.assertFalse(self.check(r, done(after, implement=opus, review={"rounds": 3}, fallback=[up, out, again]))[0])
+
+    def test_escalation_then_usage_in_the_same_family(self):
         day, moved = roster(), roster(exhausted=["codex"])
-        up = moved["escalation"]
-        plain = {"role": "implement", "from": "codex", "to": "claude", "reason": "usage"}
-        self.assertTrue(self.check(day, done(moved, implement={"family": up["family"], "model": up["model"]},
-                                             fallback=[plain]))[0])
+        up = {"role": "implement", "from": "codex", "to": "codex", "reason": "escalation"}
+        out = {"role": "implement", "from": "codex", "to": "claude", "reason": "usage"}
+        target = moved["escalation"]
+        rc = done(moved, implement={"family": target["family"], "model": target["model"]},
+                  review={"rounds": 2}, fallback=[up, out])
+        self.assertEqual(self.check(day, rc)[:2], (True, []))
+        # 올리지 않고 전환했으면 표준 등급이어야 한다.
+        self.assertEqual(self.check(day, done(moved, fallback=[out]))[:2], (True, []))
+        self.assertFalse(self.check(day, done(moved, implement={"family": target["family"], "model": target["model"]},
+                                              fallback=[out]))[0])
 
     def test_reviewer_fallback(self):
         r = roster()  # 리뷰어 Qwen

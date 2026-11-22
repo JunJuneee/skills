@@ -39,7 +39,11 @@ def family_of(result, role):
 
 
 def replay(roster, fallback, policy):
-    """전환 기록을 순서대로 다시 계산한다. 기록이 실제 배정의 흐름과 맞지 않으면 Mismatch다."""
+    """전환 기록을 순서대로 다시 계산한다. (마지막 배정, 구현이 실제로 돌고 있어야 하는 역할)을 돌려준다.
+
+    구현의 상태는 하나만 추적한다. 기록의 reason이 "escalation"이면 리뷰 2회째의 상향이고
+    "usage"이면 사용량 소진 전환이다. 기록이 그 시점의 실제 배정과 맞지 않으면 Mismatch다.
+    """
     inputs = roster["inputs"]
     now = datetime.datetime.fromisoformat(inputs["now"])
     exhausted, switches = list(inputs["exhausted"]), inputs["switches"]
@@ -48,42 +52,50 @@ def replay(roster, fallback, policy):
         return resolver.resolve(policy, roster["project"], roster["lane"], roster["night_roster"], now,
                                 resolver.parse_exhausted(",".join(exhausted), policy), switches)
 
-    def implement_family(result, escalated):
-        """구현이 실제로 돌고 있는 계열. 리뷰 2회째에 올렸으면 escalation 쪽이다."""
-        up = result.get("escalation")
-        return up["family"] if escalated and up else family_of(result, "implement")
-
     current = compute()
+    actual = current["roles"].get("implement")  # 구현이 지금 돌고 있는 역할
     escalated = False
     for index, entry in enumerate(fallback, 1):
         if not isinstance(entry, dict):
             raise Mismatch("fallback %d번이 객체가 아님" % index)
-        role, source, target = entry.get("role"), entry.get("from"), entry.get("to")
-        if role not in FALLBACK_ROLES or entry.get("reason") != "usage":
+        role, source, target, reason = entry.get("role"), entry.get("from"), entry.get("to"), entry.get("reason")
+        if role not in FALLBACK_ROLES or reason not in ("usage", "escalation"):
             raise Mismatch("fallback %d번의 role 또는 reason이 올바르지 않음" % index)
         if source not in policy["families"] or target not in policy["families"]:
             raise Mismatch("fallback %d번의 계열을 알 수 없음" % index)
-        if role == "implement":
-            # 배정된 구현 계열이 아니면, 올린 모델(escalation)에서 소진된 경우만 인정한다.
-            if source != implement_family(current, escalated):
-                up = current.get("escalation")
-                if escalated or not up or up["family"] != source:
-                    raise Mismatch("fallback %d번: 그 시점의 implement 배정은 %s가 아님" % (index, source))
-                escalated = True
-        elif family_of(current, role) != source:
+        if not actual:
+            raise Mismatch("fallback %d번: 구현을 배정할 수 없는 상태(대기)에서 이어진 기록" % index)
+
+        if reason == "escalation":
+            up = current.get("escalation")
+            if role != "implement" or escalated or not up:
+                raise Mismatch("fallback %d번: 이 시점에는 구현을 올릴 수 없음" % index)
+            if source != actual["family"] or target != up["family"]:
+                raise Mismatch("fallback %d번: 상향은 %s → %s 여야 함" % (index, actual["family"], up["family"]))
+            actual, escalated = up, True
+            continue
+
+        before = actual["family"]
+        if (before if role == "implement" else family_of(current, role)) != source:
             raise Mismatch("fallback %d번: 그 시점의 %s 배정은 %s가 아님" % (index, role, source))
-        before = implement_family(current, escalated)
         if source not in exhausted:
             exhausted.append(source)
         if role == "implement":
             switches += 1
         current = compute()
-        after = implement_family(current, escalated) if role == "implement" else family_of(current, role)
-        if role != "implement" and implement_family(current, escalated) != before:
-            raise Mismatch("fallback %d번: 구현 계열이 바뀌는데 구현 전환으로 기록하지 않음" % index)
-        if after != target:
-            raise Mismatch("fallback %d번: 다시 계산한 %s 배정은 %s가 아님" % (index, role, target))
-    return current
+        if role == "implement":
+            # 올린 경로에서는 다시 계산한 상향 대상으로만 갈 수 있다. 없으면 대기해야 한다.
+            actual = current.get("escalation") if escalated else current["roles"].get("implement")
+            if not actual:
+                raise Mismatch("fallback %d번: 전환할 구현 배정이 없어 대기해야 함" % index)
+            if actual["family"] != target:
+                raise Mismatch("fallback %d번: 다시 계산한 implement 배정은 %s가 아님" % (index, target))
+        else:
+            if source == before:
+                raise Mismatch("fallback %d번: 구현 계열도 소진되는데 구현 전환으로 기록하지 않음" % index)
+            if family_of(current, role) != target:
+                raise Mismatch("fallback %d번: 다시 계산한 %s 배정은 %s가 아님" % (index, role, target))
+    return current, actual, escalated
 
 
 def validate(manifest, receipt, current_policy):
@@ -137,12 +149,14 @@ def compare(manifest, receipt, current_policy):
     fallback = receipt.get("fallback", [])
     if not isinstance(fallback, list):
         raise Mismatch("fallback이 목록이 아님")
-    expected = replay(roster, fallback, policy) if fallback else roster
+    expected, actual, escalated = replay(roster, fallback, policy)
     roles = expected["roles"]
 
-    # 구현은 배정된 모델이거나, 리뷰 2회째 이후 올린 모델이어야 한다.
-    if not (same_role(implement, roles.get("implement")) or same_role(implement, expected.get("escalation"))):
-        reasons.append("구현 모델이 배정과 다름: %s/%s" % (implement["family"], implement["model"]))
+    # 구현은 전환 기록을 따라간 끝의 역할과 정확히 같아야 한다. 상향도 기록이 있어야 인정한다.
+    if not same_role(implement, actual):
+        reasons.append("구현 모델이 배정(전환 기록 반영)과 다름: %s/%s" % (implement["family"], implement["model"]))
+    if escalated and (type(review.get("rounds")) is not int or review["rounds"] < 2):
+        reasons.append("구현 상향은 리뷰 2회째부터인데 리뷰 횟수가 2회 미만")
     reviewer = roles.get("reviewer")
     if not same_role(review, reviewer):
         reasons.append("리뷰 모델이 배정과 다름: %s/%s" % (review["family"], review["model"]))
