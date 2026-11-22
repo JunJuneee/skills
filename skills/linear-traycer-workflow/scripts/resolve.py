@@ -101,6 +101,8 @@ def resolve(policy, project, lane, switch, now, exhausted=(), switches=0):
         "lane": lane,
         "night_roster": switch,
         "mode": "night_cn" if cn_impl else "day",
+        "policy_version": policy["version"],
+        "inputs": {"now": now.isoformat(), "exhausted": sorted(exhausted), "switches": switches},
         "roles": {},
         "wait": [],
         "notes": [],
