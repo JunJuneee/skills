@@ -32,6 +32,7 @@ def criteria_pattern(headings):
     words = "|".join(re.escape(h).replace(r"\ ", r"\s*") for h in headings)
     return re.compile(r"^\s{0,3}(?:#{1,6}\s*|\*\*)?(?:\d+[.)]\s*)?(?:" + words + r")(?!\w)", re.I)
 
+NUMBERED_TITLE = re.compile(r"^\d+[.)]\s+\S")
 LIST_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\S")
 
 
@@ -70,13 +71,25 @@ def has_criteria(description, headings):
     """완료 기준 제목 아래(하위 제목 포함)에 목록 항목이 있어야 한다."""
     criteria = criteria_pattern(headings)
     parts = sections(description, criteria)
-    return any(criteria.match(title) and any(LIST_ITEM.match(line) for line in under(parts, i))
-               for i, (_, title, _) in enumerate(parts))
+    for i, (_, title, _) in enumerate(parts):
+        if not criteria.match(title):
+            continue
+        lines = under(parts, i)
+        if NUMBERED_TITLE.match(title):
+            # "1. 완료 기준"처럼 번호로 쓴 제목이면 다음 번호 줄("2. 참고")이 다음 제목이다.
+            end = next((n for n, line in enumerate(lines) if NUMBERED_TITLE.match(line)), len(lines))
+            lines = lines[:end]
+        if any(LIST_ITEM.match(line) for line in lines):
+            return True
+    return False
 
 
-def predecessors(description):
-    """선행을 말하는 줄과 선행 제목 아래(하위 제목 포함)에 적힌 모든 이슈 식별자(대문자)."""
-    parts = sections(description)
+def predecessors(description, headings=()):
+    """선행을 말하는 줄과 선행 제목 아래(하위 제목 포함)에 적힌 모든 이슈 식별자(대문자).
+
+    완료 기준 제목에서 선행 섹션이 끝나도록 같은 제목 규칙으로 나눈다.
+    """
+    parts = sections(description, criteria_pattern(headings) if headings else None)
     lines = []
     for i, (_, title, body) in enumerate(parts):
         if PREDECESSOR_WORD.search(title):
@@ -115,6 +128,7 @@ def from_linear(node, repo, has_open_pr):
         "description": node.get("description") or "",
         "state": (node.get("state") or {}).get("name"),
         "labels": [label["name"] for label in (node.get("labels") or {}).get("nodes", [])],
+        "labels_partial": bool(((node.get("labels") or {}).get("pageInfo") or {}).get("hasNextPage")),
         "children": len(children.get("nodes", [])) + int(bool((children.get("pageInfo") or {}).get("hasNextPage"))),
         "has_open_pr": bool(has_open_pr),
         "blocked_by": blocked_by,
@@ -136,6 +150,8 @@ def check(issue, policy, project=None):
 
     if issue.get("state") not in intake["ready_states"]:
         reasons.append("상태가 %s가 아님: %s" % ("·".join(intake["ready_states"]), issue.get("state")))
+    if issue.get("labels_partial"):
+        reasons.append("라벨을 일부만 조회해 제어 라벨이 없는지 알 수 없음")
     held = [label for label in labels if label in intake["control_labels"]]
     if held:
         reasons.append("제어 라벨: " + ", ".join(held))
@@ -149,7 +165,7 @@ def check(issue, policy, project=None):
     if pending:
         reasons.append("선행 이슈 미완료: " + ", ".join(pending))
     known = {str(b["identifier"]).upper() for b in blockers} | {str(issue.get("identifier")).upper()}
-    missing = sorted(predecessors(description) - known)
+    missing = sorted(predecessors(description, intake["criteria_headings"]) - known)
     if missing:
         reasons.append("본문의 선행 이슈가 blocks 관계로 연결되지 않음: " + ", ".join(missing))
 
@@ -200,6 +216,8 @@ def main(argv=None):
         switch = args.night_roster or resolver.read_switch(policy)
         roster = resolver.resolve(policy, args.project, lane, switch, now, exhausted, args.switches)
         result["roster"] = roster
+        # 영수증을 발송 때의 정책으로 대조할 수 있게 병합된 정책을 함께 돌려준다.
+        result["policy"] = policy
         if roster["wait"]:
             result["ok"] = False
             result["reasons"] = ["모델 대기: " + ", ".join(roster["wait"])]

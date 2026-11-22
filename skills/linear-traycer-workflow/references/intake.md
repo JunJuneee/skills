@@ -60,13 +60,13 @@ python3 scripts/preflight.py --project seoulseeing --exhausted codex < issue.jso
 
 **프로젝트별 설정.** 상태 이름이나 완료 기준 제목이 다른 프로젝트는 정책의 `projects.<이름>`에 `ready_states`, `criteria_headings`를 적는다. 없으면 `intake`의 기본값을 쓴다.
 
-**Linear 응답을 그대로 넘기기.** 실행기가 읽은 이슈 노드(`state{name type}`, `labels{nodes}`, `children`, `inverseRelations`)는 바꾸지 않고 넘길 수 있다. 대상 저장소와 열린 PR 여부는 실행기가 판정해 인자로 준다. 관계를 일부만 읽었으면 미완료 선행으로 본다.
+**Linear 응답을 그대로 넘기기.** 실행기가 읽은 이슈 노드(`state{name type}`, `labels{nodes}`, `children`, `inverseRelations`)는 바꾸지 않고 넘길 수 있다. 대상 저장소와 열린 PR 여부는 실행기가 판정해 인자로 준다. 관계나 라벨을 일부만 읽었으면(`pageInfo.hasNextPage`) 실행하지 않는다.
 
 ```bash
 python3 scripts/preflight.py --project core-ser --from-linear --repo SaladLabInc/x < node.json
 ```
 
-**명세에 배정을 적는다.** 점검이 통과하면 출력의 `lane`과 `roster`를 실행 명세(manifest)에 `lane`, `roster`로 적어 조율자에게 넘긴다. 조율자는 `roster.roles`와 `roster.limits`를 따르며 모델을 문장으로 고르지 않는다. 조율자 자신도 `roster.roles.coordinator`로 띄운다.
+**명세에 배정을 적는다.** 점검이 통과하면 출력의 `lane`, `roster`, `policy`를 실행 명세(manifest)에 같은 이름으로 적어 조율자에게 넘긴다. `policy`는 발송 때의 병합된 정책이고, 나중에 정책이 바뀌어도 영수증을 그때 정책으로 대조하는 데 쓴다. 조율자는 `roster.roles`와 `roster.limits`를 따르며 모델을 문장으로 고르지 않는다. 조율자 자신도 `roster.roles.coordinator`로 띄운다.
 
 **완료 영수증.** 조율자는 끝낼 때 실제로 수행한 내용을 영수증에 적는다. 프로젝트의 기존 필드(`run_id`, `pr_number`, `head_sha` 등)는 그대로 두고 아래를 더한다.
 
@@ -75,7 +75,13 @@ python3 scripts/preflight.py --project core-ser --from-linear --repo SaladLabInc
  "implement": {"family": "codex", "model": "gpt-6.1-terra", "session_id": "..."},
  "review": {"url": "https://github.com/o/r/pull/1#issuecomment-1", "family": "qwen",
             "model": "qwen4-max-preview(openai)", "session_id": "...",
-            "verified_from_transcript": true, "rounds": 2, "unresolved_valid_findings": 0},
+            "verified_from_transcript": true, "rounds": 2, "unresolved_valid_findings": 0}}
+```
+
+실행 도중 사용량이 소진돼 계열을 바꿨으면 순서대로 `fallback`에 적고, `implement`·`review`에는 바꾼 뒤 실제로 수행한 계열과 모델을 적는다. `role`은 `implement`·`reviewer`·`critic`, `reason`은 `usage`다.
+
+```json
+{"implement": {"family": "claude", "model": "sonnet", "session_id": "..."},
  "fallback": [{"role": "implement", "from": "codex", "to": "claude", "reason": "usage", "at": "..."}]}
 ```
 
@@ -87,13 +93,14 @@ python3 scripts/receipt.py validate --manifest manifest.json --receipt receipt.j
 | --- | --- |
 | 구현 모델 | 배정된 모델이거나 `roster.escalation`의 모델 |
 | 리뷰 모델 | 배정된 리뷰어와 같음 |
-| 전환 | `fallback`이 있으면 `from` 계열을 소진으로 넣어 다시 계산한 배정과 대조한다 |
+| 전환 | `fallback`을 순서대로 다시 계산한다. 각 기록의 `from`이 그 시점의 배정이고 `to`가 다시 계산한 배정이어야 하며, 구현 전환 횟수는 상한에 포함된다 |
 | 같은 계열 리뷰 | 배정이 `same_family`를 허용했고 영수증에도 `same_family: true`가 있음 |
-| 실행 모델 확인 | `verified_from_transcript`가 참. Claude 별칭만 확인됐으면 `alias_only: true`를 적으며 S·M 줄에서만 인정 |
+| 실행 모델 확인 | `verified_from_transcript`가 참. Claude 별칭만 확인됐으면 `alias_only: true`를 적으며 최종 줄이 L이 아닐 때만 인정 |
+| 리뷰 세션 | 구현 세션과 다른 `session_id` |
 | 리뷰 횟수 | `limits.review_rounds` 이하이고 미해결 유효 지적 0건. 상한을 넘겼으면 완료가 아니라 차단으로 넘긴다 |
 | 줄 | 명세의 줄과 같거나 높음 |
 
-종료 코드는 0 통과, 2 불일치다. PR 상태·head·Linear 상태는 이 스크립트가 보지 않고 실행기가 확인한다. `roster`가 없는 명세(이 규칙 전에 발송된 실행)와 완료가 아닌 영수증은 대조하지 않고 통과시킨다.
+종료 코드는 0 통과, 2 불일치다. 형식이 틀리거나 읽을 수 없는 입력도 2다. PR 상태·head·Linear 상태는 이 스크립트가 보지 않고 실행기가 확인한다. `roster` 키가 아예 없는 명세(이 규칙 전에 발송된 실행)와 완료가 아닌 영수증은 대조하지 않고 통과시킨다. 명세에 `policy`가 없으면 현재 정책이 발송 때와 같을 때만 대조한다.
 
 ## 실행 중 지킬 것
 
