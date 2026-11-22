@@ -8,6 +8,7 @@
 """
 import argparse
 import datetime
+import hashlib
 import json
 import os
 import re
@@ -53,6 +54,12 @@ def parse_switch(text):
         if found:
             value = found.group(2)
     return value
+
+
+def policy_digest(policy):
+    """병합된 정책의 지문. 발송 때와 같은 정책으로 대조하는지 확인하는 데 쓴다."""
+    text = json.dumps(policy, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(text.encode("utf-8")).hexdigest()
 
 
 def read_switch(policy, env=None):
@@ -101,6 +108,9 @@ def resolve(policy, project, lane, switch, now, exhausted=(), switches=0):
         "lane": lane,
         "night_roster": switch,
         "mode": "night_cn" if cn_impl else "day",
+        "policy_version": policy["version"],
+        "policy_digest": policy_digest(policy),
+        "inputs": {"now": now.isoformat(), "exhausted": sorted(exhausted), "switches": switches},
         "roles": {},
         "wait": [],
         "notes": [],

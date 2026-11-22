@@ -10,7 +10,7 @@ python3 scripts/resolve.py --project core-ser --lane L --exhausted claude
 python3 scripts/preflight.py --project seoulseeing < issue.json
 ```
 
-출력의 `roles`가 역할별 배정, `limits`가 리뷰 횟수·토큰·세션 상한과 멈출 지점, `escalation`이 리뷰 2회째에 올릴 구현 모델(없으면 `null`), `notes`가 전환 사유, `wait`가 채울 수 없는 역할이다. 종료 코드 3은 대기다. 조율자는 출력을 작업 계약에 그대로 적고 각 세션의 ID를 덧붙인다. 위임마다 다시 계산하되 이미 실행 중인 세션은 바꾸지 않는다. 사용자가 명시한 모델은 계산 결과보다 우선하며 그 사실을 계약에 적는다.
+출력의 `inputs`는 계산에 쓴 시각과 소진 계열로, 나중에 [영수증을 대조](intake.md#실행기-연결)할 때 다시 계산하는 데 쓴다. 출력의 `roles`가 역할별 배정, `limits`가 리뷰 횟수·토큰·세션 상한과 멈출 지점, `escalation`이 리뷰 2회째에 올릴 구현 모델(없으면 `null`), `notes`가 전환 사유, `wait`가 채울 수 없는 역할이다. 종료 코드 3은 대기다. 조율자는 출력을 작업 계약에 그대로 적고 각 세션의 ID를 덧붙인다. 위임마다 다시 계산하되 이미 실행 중인 세션은 바꾸지 않는다. 사용자가 명시한 모델은 계산 결과보다 우선하며 그 사실을 계약에 적는다.
 
 계산 순서는 다음과 같다.
 

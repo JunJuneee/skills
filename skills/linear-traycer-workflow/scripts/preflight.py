@@ -25,7 +25,14 @@ DONE_TYPES = {"completed", "canceled"}
 ISSUE_ID = re.compile(r"\b([A-Za-z][A-Za-z0-9]+-\d+)\b")
 PREDECESSOR_WORD = re.compile(r"선행|선결|blocked by|depends on|requires", re.I)
 HEADING = re.compile(r"^\s{0,3}(?:#{1,6}\s+.*|\*\*[^*]+\*\*:?\s*)$")
-CRITERIA_HEADING = re.compile(r"^\s{0,3}(?:#{1,6}\s*|\*\*)?(?:완료\s*기준|acceptance criteria|AC)\b", re.I)
+
+
+def criteria_pattern(headings):
+    """완료 기준 제목을 찾는 정규식. 앞의 #·굵은 글씨·번호(1.)를 허용한다."""
+    words = "|".join(re.escape(h).replace(r"\ ", r"\s*") for h in headings)
+    return re.compile(r"^\s{0,3}(?:#{1,6}\s*|\*\*)?(?:\d+[.)]\s*)?(?:" + words + r")(?!\w)", re.I)
+
+NUMBERED_TITLE = re.compile(r"^\d+[.)]\s+\S")
 LIST_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\S")
 
 
@@ -35,11 +42,14 @@ def level(line):
     return len(hashes.group(1)) if hashes else 7
 
 
-def sections(description):
-    """(깊이, 제목 줄, 그 제목 바로 아래 줄들)의 목록. 첫 제목 앞의 글은 깊이 0이다."""
+def sections(description, criteria=None):
+    """(깊이, 제목 줄, 그 제목 바로 아래 줄들)의 목록. 첫 제목 앞의 글은 깊이 0이다.
+
+    criteria를 주면 표식 없이 적은 완료 기준 제목 줄도 제목으로 본다.
+    """
     out = [(0, "", [])]
     for line in (description or "").splitlines():
-        if HEADING.match(line) or CRITERIA_HEADING.match(line):
+        if HEADING.match(line) or (criteria and criteria.match(line)):
             out.append((level(line), line, []))
         else:
             out[-1][2].append(line)
@@ -57,16 +67,29 @@ def under(parts, index):
     return lines
 
 
-def has_criteria(description):
+def has_criteria(description, headings):
     """완료 기준 제목 아래(하위 제목 포함)에 목록 항목이 있어야 한다."""
-    parts = sections(description)
-    return any(CRITERIA_HEADING.match(title) and any(LIST_ITEM.match(line) for line in under(parts, i))
-               for i, (_, title, _) in enumerate(parts))
+    criteria = criteria_pattern(headings)
+    parts = sections(description, criteria)
+    for i, (_, title, _) in enumerate(parts):
+        if not criteria.match(title):
+            continue
+        lines = under(parts, i)
+        if NUMBERED_TITLE.match(title.lstrip()):
+            # "1. 완료 기준"처럼 번호로 쓴 제목이면 다음 번호 줄("2. 참고")이 다음 제목이다.
+            end = next((n for n, line in enumerate(lines) if NUMBERED_TITLE.match(line)), len(lines))
+            lines = lines[:end]
+        if any(LIST_ITEM.match(line) for line in lines):
+            return True
+    return False
 
 
-def predecessors(description):
-    """선행을 말하는 줄과 선행 제목 아래(하위 제목 포함)에 적힌 모든 이슈 식별자(대문자)."""
-    parts = sections(description)
+def predecessors(description, headings=()):
+    """선행을 말하는 줄과 선행 제목 아래(하위 제목 포함)에 적힌 모든 이슈 식별자(대문자).
+
+    완료 기준 제목에서 선행 섹션이 끝나도록 같은 제목 규칙으로 나눈다.
+    """
+    parts = sections(description, criteria_pattern(headings) if headings else None)
     lines = []
     for i, (_, title, body) in enumerate(parts):
         if PREDECESSOR_WORD.search(title):
@@ -90,15 +113,45 @@ def risky_words(text, words):
     return hits
 
 
-def check(issue, policy):
-    intake = policy["intake"]
+def from_linear(node, repo, has_open_pr):
+    """실행기가 Linear에서 읽은 이슈 노드를 사전 점검 입력 모양으로 바꾼다."""
+    relations = node.get("inverseRelations") or {}
+    children = node.get("children") or {}
+    blocked_by = [{"identifier": r["issue"]["identifier"], "state_type": r["issue"]["state"]["type"]}
+                  for r in relations.get("nodes", []) if r.get("type") == "blocks"]
+    # 관계나 하위 이슈를 다 읽지 못했으면 실행하지 않도록 미완료로 본다.
+    if (relations.get("pageInfo") or {}).get("hasNextPage"):
+        blocked_by.append({"identifier": "(관계 일부만 조회됨)", "state_type": "unknown"})
+    return {
+        "identifier": node.get("identifier"),
+        "title": node.get("title") or "",
+        "description": node.get("description") or "",
+        "state": (node.get("state") or {}).get("name"),
+        "labels": [label["name"] for label in (node.get("labels") or {}).get("nodes", [])],
+        "labels_partial": bool(((node.get("labels") or {}).get("pageInfo") or {}).get("hasNextPage")),
+        "children": len(children.get("nodes", [])) + int(bool((children.get("pageInfo") or {}).get("hasNextPage"))),
+        "has_open_pr": bool(has_open_pr),
+        "blocked_by": blocked_by,
+        "repo": repo,
+    }
+
+
+def check(issue, policy, project=None):
+    intake = dict(policy["intake"])
+    # 프로젝트가 따로 정한 ready 상태와 완료 기준 제목이 있으면 그것을 쓴다.
+    for key in ("ready_states", "criteria_headings"):
+        override = policy["projects"].get(project, {}).get(key)
+        if override:
+            intake[key] = override
     labels = [label.lower() for label in issue.get("labels", [])]
     title = issue.get("title", "")
     description = issue.get("description") or ""
     reasons = []
 
-    if issue.get("state") != intake["ready_state"]:
-        reasons.append("상태가 %s가 아님: %s" % (intake["ready_state"], issue.get("state")))
+    if issue.get("state") not in intake["ready_states"]:
+        reasons.append("상태가 %s가 아님: %s" % ("·".join(intake["ready_states"]), issue.get("state")))
+    if issue.get("labels_partial"):
+        reasons.append("라벨을 일부만 조회해 제어 라벨이 없는지 알 수 없음")
     held = [label for label in labels if label in intake["control_labels"]]
     if held:
         reasons.append("제어 라벨: " + ", ".join(held))
@@ -112,11 +165,11 @@ def check(issue, policy):
     if pending:
         reasons.append("선행 이슈 미완료: " + ", ".join(pending))
     known = {str(b["identifier"]).upper() for b in blockers} | {str(issue.get("identifier")).upper()}
-    missing = sorted(predecessors(description) - known)
+    missing = sorted(predecessors(description, intake["criteria_headings"]) - known)
     if missing:
         reasons.append("본문의 선행 이슈가 blocks 관계로 연결되지 않음: " + ", ".join(missing))
 
-    if not has_criteria(description):
+    if not has_criteria(description, intake["criteria_headings"]):
         reasons.append("완료 기준을 찾을 수 없음")
     if not issue.get("repo"):
         reasons.append("대상 저장소가 하나로 정해지지 않음")
@@ -140,6 +193,9 @@ def main(argv=None):
     p.add_argument("--now")
     p.add_argument("--night-roster", choices=["auto", "on", "off"])
     p.add_argument("--policy")
+    p.add_argument("--from-linear", action="store_true", help="입력이 실행기가 읽은 Linear 이슈 노드다")
+    p.add_argument("--repo", help="--from-linear일 때 확정된 대상 저장소")
+    p.add_argument("--has-open-pr", action="store_true", help="--from-linear일 때 이 이슈의 열린 PR이 있음")
     args = p.parse_args(argv)
 
     policy = resolver.load_policy(args.policy)
@@ -148,7 +204,9 @@ def main(argv=None):
     except ValueError as exc:
         p.error(str(exc))
     issue = json.load(sys.stdin)
-    lane, reasons = check(issue, policy)
+    if args.from_linear:
+        issue = from_linear(issue, args.repo, args.has_open_pr)
+    lane, reasons = check(issue, policy, args.project)
     result = {"identifier": issue.get("identifier"), "ok": not reasons, "lane": lane, "reasons": reasons}
     code = 2 if reasons else 0
     if not reasons:
@@ -158,6 +216,8 @@ def main(argv=None):
         switch = args.night_roster or resolver.read_switch(policy)
         roster = resolver.resolve(policy, args.project, lane, switch, now, exhausted, args.switches)
         result["roster"] = roster
+        # 영수증을 발송 때의 정책으로 대조할 수 있게 병합된 정책을 함께 돌려준다.
+        result["policy"] = policy
         if roster["wait"]:
             result["ok"] = False
             result["reasons"] = ["모델 대기: " + ", ".join(roster["wait"])]
