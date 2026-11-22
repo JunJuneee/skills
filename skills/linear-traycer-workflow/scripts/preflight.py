@@ -33,7 +33,7 @@ def criteria_pattern(headings):
     return re.compile(r"^\s{0,3}(?:#{1,6}\s*|\*\*)?(?:\d+[.)]\s*)?(?:" + words + r")(?!\w)", re.I)
 
 NUMBERED_TITLE = re.compile(r"^\d+[.)]\s+\S")
-LIST_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\S")
+LIST_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\S")
 
 
 def level(line):
@@ -67,7 +67,7 @@ def under(parts, index):
     return lines
 
 
-CHECKED_ITEM = re.compile(r"^\s*(?:[-*]|\d+[.)])\s+\[[xX]\]\s")
+CHECKED_ITEM = re.compile(r"^\s*(?:[-*+]|\d+[.)])\s+\[[xX]\]\s")
 
 
 def criteria_state(description, headings):
@@ -203,7 +203,7 @@ def check(issue, policy, project=None):
     if not lanes:
         hits = risky_words(title + "\n" + description, intake["high_risk_keywords"])
         if hits:
-            reasons.append("고위험 단어(%s)가 있는데 줄 라벨이 없음. lane-m 또는 lane-l로 확인해야 함" % ", ".join(hits))
+            reasons.append("고위험 단어(%s)가 있는데 줄 라벨이 없음. lane-s·lane-m·lane-l 중 하나로 확인해야 함" % ", ".join(hits))
     return lane, reasons
 
 

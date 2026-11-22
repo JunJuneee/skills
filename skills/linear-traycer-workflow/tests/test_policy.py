@@ -264,6 +264,12 @@ class PreflightTest(unittest.TestCase):
         self.assertEqual(self.reasons(description=partial)[1], [])
         plain = "## 완료 기준\n- [x] 설정했다.\n- 수신을 확인한다.\n"
         self.assertEqual(self.reasons(description=plain)[1], [])
+        # 목록 기호가 섞여 있어도 체크되지 않은 항목을 놓치지 않는다.
+        mixed = "## 완료 기준\n- [x] 저장했다\n+ [ ] 재시작 후 복원된다\n"
+        self.assertEqual(self.reasons(description=mixed)[1], [])
+        plus = "## 완료 기준\n+ [x] 저장했다\n+ [X] 복원된다\n"
+        self.assertTrue(any("모두 체크" in r for r in self.reasons(description=plus)[1]))
+        self.assertEqual(self.reasons(description="## 완료 기준\n+ 저장된다\n")[1], [])
 
 
     def test_every_predecessor_on_the_line_is_checked(self):
