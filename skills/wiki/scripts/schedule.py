@@ -817,10 +817,10 @@ def run_absorb(root, environ, scheduled=False, rules_path=None, send=True, absor
         report = _failed_report("internal_error")
         report["traceback"] = trace
     report.setdefault("warnings", [])
-    if collected and collected.get("status") not in ("not_configured", "disabled"):
+    if collected and collected.get("status") not in ("not_configured", "disabled", "busy"):
         import collect
         report["collect"] = collections.OrderedDict(
-            (key, collected.get(key)) for key in ("status", "notes", "events", "errors"))
+            (key, collected.get(key)) for key in ("status", "notes", "events", "errors", "notices"))
         report["warnings"] += collect.warning_codes(collected)
     entry = make_entry(report, started, clock(), scheduled)
     try:

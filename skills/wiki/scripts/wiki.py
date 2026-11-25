@@ -275,8 +275,8 @@ def cmd_collect(args, environ):
     else:
         # Counts and reason codes only: titles and bodies stay in the notes.
         print(collect.summary_line(result) + (" (dry-run, 쓰지 않음)" if args.dry_run else ""))
-        for error in result["errors"]:
-            sys.stderr.write("경고: collect_failed:%s\n" % error)
+        for warning in collect.warning_codes(result):
+            sys.stderr.write("경고: %s\n" % warning)
     return EXIT_OK if ok else EXIT_ERROR
 
 
