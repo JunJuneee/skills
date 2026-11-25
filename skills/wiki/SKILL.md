@@ -1,6 +1,6 @@
 ---
 name: wiki
-description: 개인 맥락 위키를 다룬다. init으로 work·personal 폴더와 규약을 만들고, absorb로 내가 쓴 프롬프트·memory·handoff·inbox 노트를 격리된 하위 프로세스에서 페이지로 반영하며, collect로 GitHub·Linear·Discord 활동(한 일·할 일·확인할 것의 근거)을 inbox 노트로 모으고, note로 도메인을 정해 메모를 넣고, query로 찾는다. status로 상태를 보고, schedule로 하루 한 번 자동 실행(launchd)과 Slack 한 줄 알림을 켠다. "/wiki init", "/wiki absorb", "/wiki collect", "/wiki note", "/wiki query", "/wiki status", "/wiki schedule", "위키 초기화", "위키에 반영", "위키에 메모", "위키에서 찾아줘", "위키 상태", "위키에 활동 수집", "위키 자동 실행 설치" 같은 요청에 사용.
+description: 개인 맥락 위키를 다룬다. init으로 work·personal 폴더와 규약을 만들고, absorb로 내가 쓴 프롬프트·memory·handoff·inbox 노트를 격리된 하위 프로세스에서 페이지로 반영하며, collect로 GitHub·Linear·Discord·Traycer 활동(한 일·할 일·확인할 것·논의·자료 링크의 근거)을 inbox 노트로 모으고, note로 도메인을 정해 메모를 넣고, query로 찾는다. status로 상태를 보고, schedule로 하루 한 번 자동 실행(launchd)과 Slack 한 줄 알림을 켠다. "/wiki init", "/wiki absorb", "/wiki collect", "/wiki note", "/wiki query", "/wiki status", "/wiki schedule", "위키 초기화", "위키에 반영", "위키에 메모", "위키에서 찾아줘", "위키 상태", "위키에 활동 수집", "위키 자동 실행 설치" 같은 요청에 사용.
 ---
 
 # Wiki
@@ -34,7 +34,7 @@ python3 "$SKILL_DIR/scripts/wiki.py" <명령> [옵션]
 |---|---|
 | `init` | 폴더, `SCHEMA.md`, `domains.json`, `settings.json`, `now.md`, `about-me.md`, `.gitignore`, 로컬 git(원격 없음, `main`)을 만듦 |
 | `absorb [--scheduled] [--rules-path FILE] [--no-notify] [--no-collect]` | 먼저 `collect`를 돌린 뒤(설정했을 때만) 바뀐 원본을 모아 격리된 `claude -p`로 페이지를 갱신하고 검증 후 `main`에 병합. 끝나면 장부에 기록하고 Slack 한 줄을 보냄 |
-| `collect [--dry-run] [--since-days N]` | GitHub·Linear·Discord에서 마지막 수집 이후의 활동을 가져와 `inbox/<domain>/activity/`에 노트로 씀. 다음 absorb가 반영 |
+| `collect [--dry-run] [--since-days N]` | GitHub·Linear·Discord·Traycer에서 마지막 수집 이후의 활동을 가져와 `inbox/<domain>/activity/`에 노트로 씀. 다음 absorb가 반영 |
 | `note --domain work\|personal <글>` | `inbox/<domain>/`에 메모를 넣음. 다음 absorb가 반영 |
 | `query [--domain work\|personal] [--limit N] <글>` | 현재 레포 도메인(또는 `--domain`)의 페이지에서 찾음 |
 | `status` | 지금 도는 absorb(있으면 시작 시각), 마지막 실행, 장부의 마지막 기록(상태와 사유 코드), 마지막 수집, 다음 자동 실행 시각(설치했을 때만), 반영 대기 수(숫자만), 경고(플레이스홀더, 고정 스크립트 버전 차이, 알림 실패, 위키 폴더 권한, 수집 실패, 자동 실행이 launchd에서 실패 중) |
@@ -123,21 +123,24 @@ python3 "$SKILL_DIR/scripts/wiki.py" collect              # 노트를 쓰고 커
     "first_run_days": 3,
     "github":  [{"login": "<github-login>"}],
     "linear":  [{"domain": "work", "account": "<composio-account-id>"}],
-    "discord": [{"domain": "work", "guild_id": "<guild-id>", "user_id": "<my-user-id>"}]
+    "discord": [{"domain": "work", "guild_id": "<guild-id>", "user_id": "<my-user-id>"}],
+    "traycer": true
   }
   ```
 
 - GitHub: `gh auth token --user <login>`으로 받은 토큰으로 `involves:@me`인 PR·이슈 중 기간 안에 바뀐 것과, 지금 리뷰 요청 받은 PR을 찾는다(리뷰 요청은 지난 수집에 없던 것이 생겼을 때만 새 활동으로 센다). 항목의 도메인은 레포 소유자로 정한다(`domains.json`의 `owners`). 목록에 없는 소유자의 항목은 넣지 않고 건수만 센다(`skipped_unknown_owner`).
 - Linear: composio CLI의 `LINEAR_RUN_QUERY_OR_MUTATION`으로 내가 담당이거나 만든 이슈 중 기간 안에 바뀐 것(최근 댓글 포함)과, 지금 내 담당 미완료 이슈 전체 목록을 읽는다. 조회 쿼리 하나뿐이고 쓰기는 하지 않는다.
 - Discord: composio CLI의 `DISCORDBOT_SEARCH_GUILD_MESSAGES`로 내가 쓴 글과 나를 멘션한 글을 찾고, 그 채널·스레드의 대화를 `DISCORDBOT_LIST_MESSAGES`로 읽는다(대화가 많은 순으로 `max_channels`, 기본 12곳, 채널당 100개). 앞뒤 대화를 읽지 못한 채널과 상한 밖의 채널도 검색에 걸린 내 글과 멘션은 그대로 넣고, 읽지 못한 곳 수를 노트의 "못 읽은 채널"과 결과의 `unread_channels`에 남긴다. DM은 읽지 못한다.
-- 노트는 `inbox/<domain>/activity/<소스>-<날짜-시각>.md`(0600)이고 하나가 60,000자를 넘으면 자른다. 소스마다 커서를 `.state/collect-state.json`에 두고, 성공했을 때만 옮긴다. 실패한 소스는 다음 실행이 같은 기간을 다시 가져오고 다른 소스는 그대로 쓴다. 커서가 30일보다 오래됐으면 30일 전부터만 가져오고 `collect_window_clamped:<소스>` 경고를 남긴다.
+- Traycer: 이 컴퓨터의 Traycer 대화 색인과 작업 폴더를 읽기 전용으로 읽는다(네트워크 없음, prepare와 같은 `WIKI_SRC_TRAYCER_DB`·`WIKI_SRC_TRAYCER_EPICS_DB`). 기간 안에 내가 요청한 대화마다 작업 이름과 작업 id, 대화 제목과 대화 id, 내 요청(최근 8개), 대화의 마지막 답 2개를 적고, 그 기간에 만들어진 산출물의 제목과 경로(`~/.traycer/epics/<작업 id>/artifacts/<이름>/`)를 붙인다. Traycer에는 주소가 없어서 이름·id·경로가 링크 구실을 한다. 작업의 도메인은 작업 폴더들의 git remote로 정한다(하나라도 work면 work, 모두 personal이면 personal). 판정할 수 없는 작업은 넣지 않고 `skipped_unknown_domain`으로 센다. 에이전트끼리만 주고받은 대화는 넣지 않는다.
+- 노트는 `inbox/<domain>/activity/<소스>-<날짜-시각>-<무작위>.md`(0600)이고 하나가 60,000자를 넘으면 자른다. 소스마다 커서를 `.state/collect-state.json`에 두고, 성공했을 때만 옮긴다. 실패한 소스는 다음 실행이 같은 기간을 다시 가져오고 다른 소스는 그대로 쓴다. 커서가 30일보다 오래됐으면 30일 전부터만 가져오고 `collect_window_clamped:<소스>` 경고를 남긴다.
 - 한 번에 가져오는 양에는 상한이 있다(GitHub 300건, Discord 내 글 200건·멘션 50건, Linear 바뀐 이슈 300건). GitHub와 Discord는 상한에 닿으면 커서를 마지막으로 가져온 항목 시각에 두어 다음 실행이 이어서 가져오고, Linear는 넘친 만큼이 그 기록에 없다. 어느 쪽이든 `collect_truncated:<소스>` 경고가 남는다. `--since-days N`(1~30)은 커서보다 더 과거로만 넓힌다.
 - 노트는 `.state/`의 임시 파일에 다 쓴 뒤 inbox로 옮기므로 absorb가 쓰다 만 노트를 읽지 않는다. 한 소스의 노트 중 하나라도 쓰지 못하면 그 소스의 노트를 모두 지우고 커서를 그대로 두어 다음 실행이 겹치지 않게 다시 쓴다. 수집은 한 번에 하나만 돈다(`.state/collect.lock`, 겹치면 `busy`로 건너뜀).
 - absorb는 시작할 때 `collect`를 먼저 돌린다(`--no-collect`로 끔). 자동 실행에서는 20시간 규칙으로 그날 돌 차례일 때만 돈다. 수집이 실패해도 absorb는 그대로 돌고, 사유는 `collect_failed:<소스>:<사유>` 경고로 남는다(`gh_missing`, `gh_token_failed`, `gh_api_failed`, `composio_missing`, `composio_failed`, `tool_timeout`, `linear_invalid`, `discord_invalid`, `invalid_response`, `write_failed`, `collect_config_invalid`).
 - 세션에 보이는 것은 건수와 사유 코드뿐이다. 제목과 본문은 노트에만 있다. 설정 오류 문구에도 잘못 쓴 키 이름을 넣지 않는다(계정 이름이나 비밀값일 수 있다).
 - 밖에서 온 글(PR 제목·본문, 이슈 제목·댓글, 다른 사람의 채팅, 채널 이름)은 노트에 넣을 때 한 줄로 만들고(모든 줄바꿈·제어 문자를 공백으로), 링크 괄호와 HTML 주석 표시를 바꿔 제목·코드 블록·`<!-- src: -->` 줄을 흉내 내지 못하게 한다. 링크는 평범한 `https://` 주소일 때만 건다.
 - 도메인은 설정을 믿는다. Linear 워크스페이스와 Discord 서버는 `collect.json`에 적은 `domain`으로, GitHub는 레포 소유자로 간다. 회사 일을 개인 소유 레포나 `personal`로 적은 워크스페이스에서 하면 그 내용은 personal로 들어가고, 그 뒤는 기존 `work_terms` 검사만 막는다.
-- 활동 노트가 페이지에서 어디로 가는지는 `templates/absorb_prompt.md`의 "활동 기록을 페이지로 옮기는 규칙"과 `SCHEMA.md`에 있다: 프로젝트 페이지의 `## 할 일`, `## 확인할 것`, `## 한 일`, 월별 작업 기록 노트 `notes/worklog-YYYY-MM.md`, 루트 `now.md`의 도메인별 할 일·확인할 것·최근 한 일.
+- 항목에는 원본에 있는 주소를 반드시 링크로 단다(지어내지 않는다).
+- 활동 노트가 페이지에서 어디로 가는지는 `templates/absorb_prompt.md`의 "활동 기록을 페이지로 옮기는 규칙"과 `SCHEMA.md`에 있다: 프로젝트 페이지의 `## 할 일`, `## 확인할 것`, `## 한 일`, `## 논의`(누구와 어디서 무엇을 이야기했고 어떻게 정리됐는지), `## 자료`(PR·이슈·스레드 링크와 Traycer 작업 id·산출물·md 경로), 월별 작업 기록 노트 `notes/worklog-YYYY-MM.md`, 루트 `now.md`의 도메인별 할 일·확인할 것·최근 한 일.
 - 이미 있는 위키는 `SCHEMA.md`와 `.gitignore`가 init 때의 사본이므로 `templates/SCHEMA.md`와 `templates/wiki-gitignore.txt`에 맞춰 직접 고쳐 커밋한다(absorb의 LLM은 위키에 커밋된 `SCHEMA.md`를 읽는다).
 
 ### note
@@ -288,8 +291,8 @@ absorb가 끝나면 고정 문구와 숫자만 한 줄로 보낸다. 페이지 �
 - absorb는 잠금을 잡은 뒤 `.state/absorb-running.json`(pid, 시작 시각)을 쓰고 끝날 때 지운다. `status`가 잠금 없이 실행 중인지 알려 주기 위해서다. 준비 단계 밖에서 예외로 끝나도 `last-absorb`에 실패를 남기고, 예상 못 한 예외의 traceback은 `.state/last-report.json`(0600)에만 둔다(자동 실행이면 `launchd.log`에도). `dev:absorb_running_marker`
 - LLM에게는 삭제 도구가 없는데 프롬프트는 철회로 비게 된 페이지를 지우라고 해서, LLM이 파일을 0바이트로 비우고 verify가 `frontmatter_invalid`로 묶음 전체를 거부했다(실제 실행 2026-11-24, work 묶음 원본 30개). 프롬프트는 "내용을 모두 비운다"로 바꾸고 삭제는 Python이 한다. 지우는 조건은 위 absorb 4단계 (1)이고, LLM이 낸 `withdrawn_src`는 믿지 않고 묶음의 `op: deleted` 원본(`SourceIndex.withdrawn`)을 기준으로 한다. `dev:withdrawn_reaper`
 - 같은 실행에서 LLM이 원본 id의 폴더 조각(`<폴더 이름>-`)을 빼고 옮겨 적어 `src_unknown`으로 묶음이 실패했다. 이 묶음의 원본 중 정확히 하나와 맞는 id만 Python이 고치므로, 같은 파일 이름의 다른 폴더 원본으로 잘못 붙을 위험은 "하나뿐" 조건과 폴더 토큰 검사로 막는다. `dev:src_id_repair`
-- `collect` 명령을 추가했다(계획에 없던 원본: GitHub, Linear, Discord). 계획의 원본은 모두 이 컴퓨터의 파일이라 병합된 PR, 이슈 상태, 채팅에서 정한 것이 페이지에 쌓이지 않았다. 새 원본 종류를 만들지 않고 inbox 노트로 넣어 도메인 고정, 비밀값 가림, 격리된 LLM, verify를 그대로 거치게 했다. 계정과 id는 공개 레포에 두지 않고 위키의 `collect.json`(git 제외)에서 읽는다. `dev:activity_collect`
-- 프로젝트 페이지에 `## 할 일`, `## 확인할 것`, `## 한 일`을, notes에 월별 작업 기록(`worklog-YYYY-MM`)을, `now.md` 초안에 같은 세 묶음을 더했다. 계획의 프로젝트 페이지는 "이번 주 무엇을 왜"와 "현재 상태"뿐이라 끝낸 일과 남은 일이 기록으로 남지 않았다. 세 섹션은 `## 현재 상태`처럼 항목마다 src 줄을 둔다. `dev:work_sections`
+- `collect` 명령을 추가했다(계획에 없던 원본: GitHub, Linear, Discord, 그리고 Traycer 대화의 답과 산출물 경로. 계획은 Traycer에서 내 프롬프트만 읽었다). 계획의 원본은 모두 이 컴퓨터의 파일이라 병합된 PR, 이슈 상태, 채팅에서 정한 것이 페이지에 쌓이지 않았다. 새 원본 종류를 만들지 않고 inbox 노트로 넣어 도메인 고정, 비밀값 가림, 격리된 LLM, verify를 그대로 거치게 했다. 계정과 id는 공개 레포에 두지 않고 위키의 `collect.json`(git 제외)에서 읽는다. `dev:activity_collect`
+- 프로젝트 페이지에 `## 할 일`, `## 확인할 것`, `## 한 일`, `## 논의`, `## 자료`를, notes에 월별 작업 기록(`worklog-YYYY-MM`)을, `now.md` 초안에 같은 세 묶음을 더했다. 계획의 프로젝트 페이지는 "이번 주 무엇을 왜"와 "현재 상태"뿐이라 끝낸 일과 남은 일이 기록으로 남지 않았다. 세 섹션은 `## 현재 상태`처럼 항목마다 src 줄을 둔다. `dev:work_sections`
 - 자동 실행이 launchd에서 실패하는 것을 `status`가 알려 준다(`launchd_failing:<코드>`, `root_tcc_protected`). 실제로 위키를 `~/Desktop` 아래로 옮긴 뒤 launchd가 종료 코드 78로 열흘 넘게 한 번도 돌지 못했는데, 스크립트가 시작도 못 해 장부·Slack·`status` 어디에도 드러나지 않았다(2026-11-14~11-25, 실행 440여 회 모두 78. 같은 폴더를 여는 시험 작업도 `Operation not permitted`). `dev:launchd_health`
 
 ## 격리 실측 (claude 2.1.318, 2026-11-06)

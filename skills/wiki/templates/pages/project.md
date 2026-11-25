@@ -41,6 +41,18 @@ updated: 2026-01-01
 - 2026-01-01 <끝낸 일과 그 결과> ([<owner>/<repo>#1](https://github.com/<owner>/<repo>/pull/1))
 <!-- src: inbox:personal/activity/github-20260101-000000.md @2026-01-01 -->
 
+## 논의
+
+- 2026-01-01 <어디서·누구와>: <무엇을 논의했고 어떻게 정리됐는지> ([스레드](https://discord.com/channels/1/2/3))
+<!-- src: inbox:personal/activity/discord-20260101-000000.md @2026-01-01 -->
+
+## 자료
+
+- PR: <제목> ([<owner>/<repo>#1](https://github.com/<owner>/<repo>/pull/1))
+<!-- src: inbox:personal/activity/github-20260101-000000.md @2026-01-01 -->
+- Traycer 작업: <작업 이름> (`<작업 id>`)
+<!-- src: inbox:personal/activity/traycer-20260101-000000.md @2026-01-01 -->
+
 ## 실측값과 함정
 
 - [[personal/notes/<project-name>-notes|실측값과 함정]]
