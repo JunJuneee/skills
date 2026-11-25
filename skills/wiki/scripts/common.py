@@ -1207,6 +1207,8 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
 # One "<code>:<short text>" per bullet of SKILL.md "계획과 달라진 점"; each
 # bullet ends with the same `dev:<code>` tag (tests/test_repo_hygiene.py).
 PLAN_DEVIATIONS = (
+    "withdrawn_reaper:python deletes pages the LLM blanked for a withdrawn source (no delete tool); only when every cited src is withdrawn and no human notes would be lost",
+    "src_id_repair:an unknown src id that matches exactly one of the batch's own sources by kind, file name and folder tokens is rewritten before verify",
     "prompt_classify:prompts in a folder with no domain are classified "
     "(work_terms and session signals first, then a tools-off LLM; unknown stays out)",
     "claude_p_flags:restricted,acceptEdits,permission_prompts_none,"

@@ -350,5 +350,30 @@ class RulesAndCachesTest(RepoCase):
         self.assertEqual(verify.scan_tree(self.wt, []), ["x.md:anthropic"])
 
 
+class SrcIdRepairTest(unittest.TestCase):
+    RIGHT = "mem:-srv-app-Desktop-app-Proj-Gateway/vpc-peering.md"
+
+    def test_same_source_id_matching(self):
+        same = verify._same_source_id
+        self.assertTrue(same("mem:-srv-app-Proj-Gateway/vpc-peering.md", self.RIGHT))
+        self.assertFalse(same(self.RIGHT, self.RIGHT))
+        self.assertFalse(same("mem:-srv-app-Proj-Gateway/other.md", self.RIGHT))
+        self.assertFalse(same("handoff:-srv-app-Proj-Gateway/vpc-peering.md", self.RIGHT))
+        self.assertFalse(same("mem:-opt-other-Elsewhere/vpc-peering.md", self.RIGHT))
+        self.assertFalse(same("mem:/vpc-peering.md", self.RIGHT))
+        # Same date, other domain: neither folder is a subsequence of the other.
+        self.assertFalse(same("prompts:work/2026-11-24", "prompts:personal/2026-11-24"))
+
+    def test_rewrite_skips_code_fences(self):
+        wrong = "<!-- src: mem:a/x.md @2026-11-01 -->"
+        text = "문단\n%s\n```\n%s\n```\n%s\n" % (wrong, wrong, wrong)
+        out, count = verify._rewrite_src_comments(
+            text, lambda i: "mem:b/x.md" if i == "mem:a/x.md" else None)
+        self.assertEqual(count, 2)
+        self.assertEqual(out.count("mem:b/x.md"), 2)
+        self.assertEqual(out.count("mem:a/x.md"), 1)
+        self.assertIn("```\n%s\n```" % wrong, out)
+
+
 if __name__ == "__main__":
     unittest.main()
