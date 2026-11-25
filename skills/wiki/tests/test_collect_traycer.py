@@ -149,6 +149,20 @@ class TraycerTest(TraycerCase):
         self.assertNotIn("escape", note)
         self.assertNotIn(self.env["HOME"], note)  # the home folder is written as ~
 
+    def test_answer_to_an_earlier_request_is_kept(self):
+        self.epic("epic-home", "장난감", ["MeUser"])
+        self.chat("epic-home", "c3", "장난감 고치기", [
+            ("user", 0, "2026-01-01T00:00:00Z", "창 이전의 요청"),
+            ("assistant", 0, "2026-03-09T03:00:00Z", "창 안의 답")])
+        self.chat("epic-home", "c4", "하위 에이전트", [
+            ("user", 1, "2026-01-01T00:00:00Z", "에이전트끼리"),
+            ("assistant", 0, "2026-03-09T04:00:00Z", "하위 답")])
+        self.run_collect()
+        note = self.note("personal")
+        self.assertIn("에이전트: 창 안의 답", note)
+        self.assertNotIn("창 이전의 요청", note)
+        self.assertNotIn("하위", note)
+
     def test_nothing_in_the_window_writes_no_note(self):
         self.epic("epic-home", "장난감", ["MeUser"])
         self.chat("epic-home", "c3", "장난감 고치기", [
