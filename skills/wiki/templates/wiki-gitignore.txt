@@ -13,3 +13,5 @@ _drafts/
 .DS_Store
 # local notify settings (channel ID, token_cmd); never committed
 /notify.json
+# local collect settings (account names, ids); never committed
+/collect.json

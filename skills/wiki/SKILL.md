@@ -1,17 +1,17 @@
 ---
 name: wiki
-description: 개인 맥락 위키를 다룬다. init으로 work·personal 폴더와 규약을 만들고, absorb로 내가 쓴 프롬프트·memory·handoff·inbox 노트를 격리된 하위 프로세스에서 페이지로 반영하며, note로 도메인을 정해 메모를 넣고, query로 찾는다. status로 상태를 보고, schedule로 하루 한 번 자동 실행(launchd)과 Slack 한 줄 알림을 켠다. "/wiki init", "/wiki absorb", "/wiki note", "/wiki query", "/wiki status", "/wiki schedule", "위키 초기화", "위키에 반영", "위키에 메모", "위키에서 찾아줘", "위키 상태", "위키 자동 실행 설치" 같은 요청에 사용.
+description: 개인 맥락 위키를 다룬다. init으로 work·personal 폴더와 규약을 만들고, absorb로 내가 쓴 프롬프트·memory·handoff·inbox 노트를 격리된 하위 프로세스에서 페이지로 반영하며, collect로 GitHub·Linear·Discord·Traycer 활동(한 일·할 일·확인할 것·논의·자료 링크의 근거)을 inbox 노트로 모으고, note로 도메인을 정해 메모를 넣고, query로 찾는다. status로 상태를 보고, schedule로 하루 한 번 자동 실행(launchd)과 Slack 한 줄 알림을 켠다. "/wiki init", "/wiki absorb", "/wiki collect", "/wiki note", "/wiki query", "/wiki status", "/wiki schedule", "위키 초기화", "위키에 반영", "위키에 메모", "위키에서 찾아줘", "위키 상태", "위키에 활동 수집", "위키 자동 실행 설치" 같은 요청에 사용.
 ---
 
 # Wiki
 
 `SKILL.md`가 있는 디렉터리를 `SKILL_DIR`로 쓴다. 모든 명령은 같은 진입점 하나로 실행한다. Claude Code에서는 `/wiki <명령>`, Codex에서는 `$wiki`로 부르며 실행 방법은 같다.
 
-이 컴퓨터의 기본 위키는 GitHub 클론 `/Users/saladlab/Desktop/github/llm-wiki`다. 사용자가 다른 위치를 지정하지 않으면 각 명령을 실행하는 셸에서 `WIKI_ROOT=/Users/saladlab/Desktop/github/llm-wiki`를 설정한다. 예약 작업도 이 클론을 사용한다. `~/wiki`는 이전 위키이므로 기본 대상으로 쓰지 않는다.
+이 컴퓨터의 기본 위키는 GitHub 클론 `$HOME/Desktop/github/llm-wiki`다. 사용자가 다른 위치를 지정하지 않으면 각 명령을 실행하는 셸에서 `WIKI_ROOT="$HOME/Desktop/github/llm-wiki"`를 설정한다. 예약 작업도 이 클론을 사용한다. `~/wiki`는 이전 위키이므로 기본 대상으로 쓰지 않는다.
 
 ```bash
 SKILL_DIR='<이 SKILL.md가 있는 디렉터리>'
-export WIKI_ROOT='/Users/saladlab/Desktop/github/llm-wiki'
+export WIKI_ROOT="$HOME/Desktop/github/llm-wiki"
 python3 "$SKILL_DIR/scripts/wiki.py" <명령> [옵션]
 ```
 
@@ -33,10 +33,11 @@ python3 "$SKILL_DIR/scripts/wiki.py" <명령> [옵션]
 | 명령 | 하는 일 |
 |---|---|
 | `init` | 폴더, `SCHEMA.md`, `domains.json`, `settings.json`, `now.md`, `about-me.md`, `.gitignore`, 로컬 git(원격 없음, `main`)을 만듦 |
-| `absorb [--scheduled] [--rules-path FILE] [--no-notify]` | 바뀐 원본을 모아 격리된 `claude -p`로 페이지를 갱신하고 검증 후 `main`에 병합. 끝나면 장부에 기록하고 Slack 한 줄을 보냄 |
+| `absorb [--scheduled] [--rules-path FILE] [--no-notify] [--no-collect]` | 먼저 `collect`를 돌린 뒤(설정했을 때만) 바뀐 원본을 모아 격리된 `claude -p`로 페이지를 갱신하고 검증 후 `main`에 병합. 끝나면 장부에 기록하고 Slack 한 줄을 보냄 |
+| `collect [--dry-run] [--since-days N]` | GitHub·Linear·Discord·Traycer에서 마지막 수집 이후의 활동을 가져와 `inbox/<domain>/activity/`에 노트로 씀. 다음 absorb가 반영 |
 | `note --domain work\|personal <글>` | `inbox/<domain>/`에 메모를 넣음. 다음 absorb가 반영 |
 | `query [--domain work\|personal] [--limit N] <글>` | 현재 레포 도메인(또는 `--domain`)의 페이지에서 찾음 |
-| `status` | 지금 도는 absorb(있으면 시작 시각), 마지막 실행, 장부의 마지막 기록(상태와 사유 코드), 다음 자동 실행 시각(설치했을 때만), 반영 대기 수(숫자만), 경고(플레이스홀더, 고정 스크립트 버전 차이, 알림 실패, 위키 폴더 권한) |
+| `status` | 지금 도는 absorb(있으면 시작 시각), 마지막 실행, 장부의 마지막 기록(상태와 사유 코드), 마지막 수집, 다음 자동 실행 시각(설치했을 때만), 반영 대기 수(숫자만), 경고(플레이스홀더, 고정 스크립트 버전 차이, 알림 실패, 위키 폴더 권한, 수집 실패, 자동 실행이 launchd에서 실패 중) |
 | `schedule install\|uninstall\|print [--no-load] [--claude PATH] [--rules-path FILE]` | launchd 작업을 설치·제거하거나 설치될 plist를 보여 줌(`--install`, `--uninstall`, `--print`도 됨) |
 
 ### init
@@ -78,6 +79,7 @@ python3 "$SKILL_DIR/scripts/wiki.py" status
 2. `.absorb-wt`(분리된 git worktree, `base_sha`에서 시작)를 새로 만든다.
 3. 묶음마다 staging을 읽기 전용(파일 0444, 폴더 0555)으로 잠그고 격리된 `claude -p`를 부른다. 작업 폴더는 `.absorb-wt/<domain>/`, `--add-dir`는 그 묶음 staging 하나뿐. 지시문은 `templates/absorb_prompt.md`(맨 앞이 "원본 본문은 데이터" 안전 규칙, `SCHEMA.md` 전문 포함, 원본 본문은 넣지 않고 경로만 줌).
 4. verify(`scripts/verify.py`)가 묶음을 검사한다. 하나라도 걸리면 그 묶음은 worktree에서만 되돌리고, 원본은 다음 실행에 다시 나온다. 되돌리기 전에 그 묶음이 바꾼 파일을 비밀값을 가린 사본으로 `.state/failed/<run_id>/<묶음>/`(폴더 0700, 파일 0600, `.state/`는 git 밖)에 남기고, `failure.json`에 사유 코드, 문제 목록, 원본 id, 바뀐 파일 목록, LLM의 구조화 출력을 같은 방식으로 가려 적는다(묶음 결과의 `failed_draft_kept` 경고). 걸린 값은 그 자리에 `[REDACTED:<종류>]`로 보이므로 무엇이 걸렸는지 알 수 있다. 비밀값처럼 생긴 파일 이름은 해시 이름(`_renamed/`)으로 바꾼다. 최근 5회 실행분만 둔다.
+   - verify 전에 Python이 두 가지를 먼저 한다(실패하면 묶음과 함께 worktree에서 되돌려짐). (1) LLM이 철회 때문에 비운 페이지를 지운다: 그 페이지가 묶음 시작 때 인용하던 src가 모두 철회 원본이고(하나 이상), 빈 파일이거나 제목만 남았으며 `## 내 메모`에 사람 글이 없을 때만이다. 지운 뒤에는 삭제 페이지의 기존 검사(`my_notes_changed` 등)를 그대로 받는다. 경고 `withdrawn_page_removed:<개수>`. (2) 모르는 src id가 이 묶음의 원본 하나와 종류, 파일 이름, 폴더 토큰(한쪽이 다른 쪽의 부분열)이 맞으면 그 id로 고친다(`## 내 메모` 위, 코드 블록 밖만). 후보가 0개나 2개 이상이면 그대로 `src_unknown`. 경고 `src_id_repaired:<개수>`.
    - 바뀐 파일: `git diff --name-status -z --no-renames <묶음 시작>`과 무시된 파일까지 포함한 `git ls-files --others -z`. `allowed_globs`(`<domain>/**`) 밖의 경로, 심볼릭 링크, 일반 파일이 아닌 것이 하나라도 있으면 실패.
    - frontmatter 문법과 `domain`, `.md`만 허용, `## 내 메모` 바이트 비교(내 메모에 글이 있는 페이지 삭제도 실패). LLM이 새로 만든 페이지는 빈 `## 내 메모` 제목으로만 끝나야 한다(그 아래 글이 있으면 `my_notes_changed`). `.gitkeep`은 비어 있어야 한다.
    - src: 바뀐 페이지의 모든 `<!-- src: … -->`가 알려진 같은 도메인 원본이어야 함. 모르는 id는 도메인을 확인할 수 없으므로 실패. 이 도메인에서 철회된 원본을 가리키는 src가 도메인 어디에든 남아 있으면 실패.
@@ -103,6 +105,43 @@ python3 "$SKILL_DIR/scripts/wiki.py" status
 - 루트 `now.md`·`about-me.md`는 실행을 실패시키지 않는다. 초안 조각의 코드 블록(```` ``` ````)이 닫히지 않았으면 그 묶음만 `draft_unbalanced_fence`로 실패한다. 루트 파일 자체의 코드 블록이 닫히지 않았거나(Obsidian에서 붙여 넣은 ```` ``` ```` 등) `## 내 메모`가 코드 안에 있어 안전하게 다시 조립할 수 없으면 그 파일은 그대로 두고 `root_file_skipped:<파일>` 경고만 한다. 고치면 다음 실행에 다시 조립된다.
 - 사용자 rules 폴더(`CLAUDE_CONFIG_DIR/rules`, 없으면 `~/.claude/rules`. 심볼릭 링크로 연결한 하위 폴더도 따라 들어간다)에 전역 선호 규칙 파일 말고 다른 `.md`가 있으면 personal 묶음은 `user_rules_unisolated`로 돌지 않는다(`user_rules_present:<개수>` 경고). 전역 선호 규칙 파일로 인정하는 것은 이름(`wiki-prefs.md` 또는 `--rules-path`)이 맞고, 심볼릭 링크가 아닌 일반 파일이며, 내용이 absorb가 쓰는 모양(머리말 뒤에 `- ` 줄만)이고, absorb가 마지막으로 그 자리에 쓴 내용과 바이트까지 같으며(쓸 때마다, 내용이 그대로여도 `.state/rules-written.json`에 sha256을 남긴다), `work_terms`에 걸리지 않는 파일뿐이다(2차 수정: 모양만 같은 파일, 쓴 뒤에 고친 파일, 회사 문구가 든 파일은 다른 파일로 센다). 그 폴더가 absorb LLM에 보이지 않는다는 것은 2.1.318에서 실측했다(아래 "격리 실측"). 이 멈춤은 claude 버전이 바뀌어 격리가 깨질 때를 대비한 이중 장치로 남긴다. work 묶음은 그대로 돈다.
 - 실행이 결과(`ok`, `empty`, `failed`, `held`)까지 가면 수동이든 자동이든 `.state/absorb-ledger.json`(장부)에 기록한다. `--no-notify`면 Slack은 보내지 않고 장부만 남긴다.
+
+### collect (외부 활동 수집)
+
+absorb가 읽는 원본은 이 컴퓨터에 있는 것(프롬프트, memory, handoff, inbox)뿐이다. PR이 병합됐는지, 이슈가 어디까지 갔는지, 채팅에서 무엇을 정했는지는 그 원본에 없다. `collect`가 그것을 가져와 inbox 노트로 쓰고, 페이지로 옮기는 일은 absorb가 그대로 한다(도메인은 폴더로 고정, prepare가 비밀값을 가림, LLM 단계는 본문을 데이터로만 다룸, verify가 검사). `collect`는 페이지를 쓰지 않고 LLM도 부르지 않는다.
+
+```bash
+python3 "$SKILL_DIR/scripts/wiki.py" collect --dry-run   # 가져와서 건수만 보고, 쓰지 않음
+python3 "$SKILL_DIR/scripts/wiki.py" collect              # 노트를 쓰고 커서를 옮김
+```
+
+- 설정은 `<위키>/collect.json`(git에 들어가지 않음. 계정 이름과 id가 들어 있어서다). 없으면 아무것도 하지 않는다. 사용자가 계정과 도메인을 알려 준 것만 넣고 짐작해서 채우지 않는다.
+
+  ```json
+  {
+    "enabled": true,
+    "first_run_days": 3,
+    "github":  [{"login": "<github-login>"}],
+    "linear":  [{"domain": "work", "account": "<composio-account-id>"}],
+    "discord": [{"domain": "work", "guild_id": "<guild-id>", "user_id": "<my-user-id>"}],
+    "traycer": true
+  }
+  ```
+
+- GitHub: `gh auth token --user <login>`으로 받은 토큰으로 `involves:@me`인 PR·이슈 중 기간 안에 바뀐 것과, 지금 리뷰 요청 받은 PR을 찾는다(리뷰 요청은 지난 수집에 없던 것이 생겼을 때만 새 활동으로 센다). 항목의 도메인은 레포 소유자로 정한다(`domains.json`의 `owners`). 목록에 없는 소유자의 항목은 넣지 않고 건수만 센다(`skipped_unknown_owner`).
+- Linear: composio CLI의 `LINEAR_RUN_QUERY_OR_MUTATION`으로 내가 담당이거나 만든 이슈 중 기간 안에 바뀐 것(최근 댓글 포함)과, 지금 내 담당 미완료 이슈 전체 목록을 읽는다. 조회 쿼리 하나뿐이고 쓰기는 하지 않는다.
+- Discord: composio CLI의 `DISCORDBOT_SEARCH_GUILD_MESSAGES`로 내가 쓴 글과 나를 멘션한 글을 찾고, 그 채널·스레드의 대화를 `DISCORDBOT_LIST_MESSAGES`로 읽는다(대화가 많은 순으로 `max_channels`, 기본 12곳, 채널당 100개). 앞뒤 대화를 읽지 못한 채널과 상한 밖의 채널도 검색에 걸린 내 글과 멘션은 그대로 넣고, 읽지 못한 곳 수를 노트의 "못 읽은 채널"과 결과의 `unread_channels`에 남긴다. DM은 읽지 못한다.
+- Traycer: 이 컴퓨터의 Traycer 대화 색인과 작업 폴더를 읽기 전용으로 읽는다(네트워크 없음, prepare와 같은 `WIKI_SRC_TRAYCER_DB`·`WIKI_SRC_TRAYCER_EPICS_DB`). 기간 안에 내가 요청한 대화마다 작업 이름과 작업 id, 대화 제목과 대화 id, 내 요청(최근 8개), 대화의 마지막 답 2개를 적고, 그 기간에 만들어진 산출물의 제목과 경로(`~/.traycer/epics/<작업 id>/artifacts/<이름>/`)를 붙인다. Traycer에는 주소가 없어서 이름·id·경로가 링크 구실을 한다. 작업의 도메인은 작업 폴더들의 git remote로 정한다(하나라도 work면 work, 모두 personal이면 personal). 판정할 수 없는 작업(폴더가 없음, remote가 없거나 모르는 소유자, 홈 폴더 자체)은 넣지 않고 `skipped_unknown_domain`으로 센다. 작업의 폴더 목록은 작업을 만들 때 기록된 것이라, 나중에 붙인 폴더는 판정에 들어가지 않는다. 에이전트끼리만 주고받은 대화는 넣지 않는다.
+- 노트는 `inbox/<domain>/activity/<소스>-<날짜-시각>.md`(0600. 이미 반영돼 `inbox-done`으로 간 이름은 다시 쓰지 않고 `-2`를 붙인다. 이름에 무작위 조각을 넣었더니 absorb의 LLM이 src 줄로 옮겨 적다 빠뜨려 묶음이 `src_unknown`으로 실패했다)이고 하나가 60,000자를 넘으면 자른다. 소스마다 커서를 `.state/collect-state.json`에 두고, 성공했을 때만 옮긴다. 실패한 소스는 다음 실행이 같은 기간을 다시 가져오고 다른 소스는 그대로 쓴다. 커서가 30일보다 오래됐으면 30일 전부터만 가져오고 `collect_window_clamped:<소스>` 경고를 남긴다.
+- 한 번에 가져오는 양에는 상한이 있다(GitHub 300건, Discord 내 글 200건·멘션 50건, Linear 바뀐 이슈 300건, Traycer 도메인당 대화 40개). GitHub, Discord, Traycer는 상한에 닿으면 커서를 마지막으로 가져온 항목 시각에 두어 다음 실행이 이어서 가져오고, Linear는 넘친 만큼이 그 기록에 없다. 어느 쪽이든 `collect_truncated:<소스>` 경고가 남는다. `--since-days N`(1~30)은 커서보다 더 과거로만 넓힌다.
+- 노트는 `.state/`의 임시 파일에 다 쓴 뒤 inbox로 옮기므로 absorb가 쓰다 만 노트를 읽지 않는다. 한 소스가 두 도메인에 노트를 낼 때는 둘 다 임시 파일로 다 쓴 뒤에 게시하므로, 쓰기 실패(디스크, 권한)는 inbox에 아무것도 없는 상태에서 난다. 그때는 커서를 그대로 두고 다음 실행이 다시 쓴다. 게시(link) 단계에서 하나만 실패하면 먼저 게시된 노트는 지우지 않고(absorb가 이미 읽었을 수 있다) 커서를 두므로 다음 실행에 그 노트가 한 번 겹친다. 수집은 한 번에 하나만 돈다(`.state/collect.lock`, 겹치면 `busy`로 건너뜀).
+- absorb는 시작할 때 `collect`를 먼저 돌린다(`--no-collect`로 끔). 자동 실행에서는 20시간 규칙으로 그날 돌 차례일 때만 돈다. 수집이 실패해도 absorb는 그대로 돌고, 사유는 `collect_failed:<소스>:<사유>` 경고로 남는다(`gh_missing`, `gh_token_failed`, `gh_api_failed`, `composio_missing`, `composio_failed`, `tool_timeout`, `linear_invalid`, `discord_invalid`, `traycer_missing`, `traycer_schema`, `traycer_unavailable`, `invalid_response`, `write_failed`, `collect_config_invalid`).
+- 세션에 보이는 것은 건수와 사유 코드뿐이다. 제목과 본문은 노트에만 있다. 설정 오류 문구에도 잘못 쓴 키 이름을 넣지 않는다(계정 이름이나 비밀값일 수 있다).
+- 밖에서 온 글(PR 제목·본문, 이슈 제목·댓글, 다른 사람의 채팅, 채널 이름)은 노트에 넣을 때 한 줄로 만들고(모든 줄바꿈·제어 문자를 공백으로), 링크 괄호와 HTML 주석 표시를 바꿔 제목·코드 블록·`<!-- src: -->` 줄을 흉내 내지 못하게 한다. 링크는 평범한 `https://` 주소일 때만 건다.
+- 도메인은 설정을 믿는다. Linear 워크스페이스와 Discord 서버는 `collect.json`에 적은 `domain`으로, GitHub는 레포 소유자로 간다. 회사 일을 개인 소유 레포나 `personal`로 적은 워크스페이스에서 하면 그 내용은 personal로 들어가고, 그 뒤는 기존 `work_terms` 검사만 막는다.
+- 항목에는 원본에 있는 주소를 반드시 링크로 단다(지어내지 않는다).
+- 활동 노트가 페이지에서 어디로 가는지는 `templates/absorb_prompt.md`의 "활동 기록을 페이지로 옮기는 규칙"과 `SCHEMA.md`에 있다: 프로젝트 페이지의 `## 할 일`, `## 확인할 것`, `## 한 일`, `## 논의`(누구와 어디서 무엇을 이야기했고 어떻게 정리됐는지), `## 자료`(PR·이슈·스레드 링크와 Traycer 작업 id·산출물·md 경로), 월별 작업 기록 노트 `notes/worklog-YYYY-MM.md`, 루트 `now.md`의 도메인별 할 일·확인할 것·최근 한 일.
+- 이미 있는 위키는 `SCHEMA.md`와 `.gitignore`가 init 때의 사본이므로 `templates/SCHEMA.md`와 `templates/wiki-gitignore.txt`에 맞춰 직접 고쳐 커밋한다(absorb의 LLM은 위키에 커밋된 `SCHEMA.md`를 읽는다).
 
 ### note
 
@@ -145,6 +184,7 @@ python3 "$SKILL_DIR/scripts/wiki.py" schedule uninstall
 - 알림이 설정되지 않았으면 `install`과 `status`가 `notify_not_configured`로 알려 준다(자동 실행의 결과를 받을 곳이 Slack뿐이라서). `token_cmd` 프로그램은 plist의 `PATH`에 없으면 `~/.local/bin`, `/opt/homebrew/bin`, `/usr/local/bin`에서도 찾는다. 확실하게 하려면 `token_cmd`의 첫 값을 절대 경로로 쓴다.
 - absorb가 도는 중(잠금)에는 `install`, `uninstall`이 `lock_busy`로 멈춘다.
 - 플러그인을 업데이트하면 고정 스크립트는 그대로다. `status`가 `bin_stale`로 알려 주면 `schedule install`을 다시 돌린다.
+- 위키가 macOS가 보호하는 홈 폴더(`~/Desktop`, `~/Documents`, `~/Downloads`) 아래에 있으면 launchd 작업은 로그 파일도 위키도 열지 못해 한 번도 돌지 못한다(launchd 종료 코드 78, 스크립트는 시작도 못 해 장부와 Slack에 아무것도 남지 않는다). `schedule install`과 `status`가 `root_tcc_protected`로 알려 주고, `status`는 launchd가 기록한 마지막 종료 코드가 0이 아니면 `launchd_failing:<코드>`도 보여 준다. 위키를 보호 폴더 밖에 두거나(보호 폴더 쪽에는 심볼릭 링크만 둔다) `/usr/bin/python3`에 전체 디스크 접근 권한을 준다.
 - 테스트와 다른 환경에서는 `WIKI_LAUNCH_AGENTS_DIR`, `WIKI_LAUNCHCTL`로 위치를 바꿀 수 있다.
 
 20시간 규칙(D7): launchd가 30분마다 `absorb --scheduled`를 부르면, 장부에 오늘(현지 날짜) 기록이 없고 마지막 실행 시작 후 `schedule.min_hours_between_runs`(20)시간이 지났을 때만 돈다. 장부가 비어 있으면 `.state/last-absorb`를 본다.
@@ -249,6 +289,11 @@ absorb가 끝나면 고정 문구와 숫자만 한 줄로 보낸다. 페이지 �
 - 3차 수정: 실제 실행(2026-11-06)의 work 묶음 하나(원본 28개)가 `secret_found`로 실패했고 초안이 남지 않았다. 원본 28개를 읽기 전용으로 다시 검사하고, 위키 사본에서 그 묶음의 LLM 단계만 다시 돌려(실제 위키는 건드리지 않음) 같은 원본에서 나온 같은 주제의 페이지(파일 이름은 다름)가 같은 사유로 실패하는 것을 재현했다. 재실행에서 걸린 것은 비밀값이 아니라 오탐이었다. 원본의 `` `<X>_API_TOKEN` = `REPLACE_ME` ``(배포 실패 시험용 자리표시자)를 LLM이 `` `<X>_API_TOKEN=REPLACE_ME` ``로 다시 써서 대입 규칙에 걸렸다. 같은 원본의 `` `secretsmanager:GetSecretValue` ``(IAM 동작 이름)도 prepare에서 대입으로 가려졌고, 값이 닫는 백틱까지 먹어 마크다운이 깨졌으며 LLM이 가려진 이름을 되살려 쓰면 같은 실패가 난다. 고친 것: 대입 값은 백틱에서 끝난다(값을 백틱으로 감싸도 여전히 걸림), `REPLACE_ME`·`CHANGE_ME`·`your_<...>`·`dummy`·`placeholder`·`todo`·`tbd`는 자리표시자로 본다, `secretsmanager:<PascalCase 동작>`과 `arn:aws…:secretsmanager:…`는 이름으로 본다(그 밖의 `secretName:`·`secretRef:` 같은 키는 그대로 검사). 원래 실행의 초안은 남지 않아 그때 걸린 문자열을 확정할 수는 없지만, 원본에서 나올 수 있는 두 경로가 모두 오탐이었고 둘 다 이제 통과한다. 사본에서 다시 돌린 묶음의 페이지 전체가 새 검사로는 통과했고, 실제 원본 128개 중 가림 결과가 바뀐 것은 IAM 동작 이름 하나, 실제 위키 페이지 59개는 0개였다(진짜 토큰 대입은 그대로 가려짐). `dev:assign_false_positives`
 - 3차 수정: 실패한 묶음은 worktree에서 되돌리기 전에 바꾼 파일을 비밀값을 가린 사본으로 `.state/failed/<run_id>/<묶음>/`에 남긴다(absorb 4단계, 최근 5회). 계획은 실패한 묶음을 되돌리기만 했고, 위 실패는 초안이 없어 원인을 바로 알 수 없었다. 사본을 남기는 일이 실패해도 묶음의 사유 코드는 바뀌지 않는다. `dev:failed_draft_retention`
 - absorb는 잠금을 잡은 뒤 `.state/absorb-running.json`(pid, 시작 시각)을 쓰고 끝날 때 지운다. `status`가 잠금 없이 실행 중인지 알려 주기 위해서다. 준비 단계 밖에서 예외로 끝나도 `last-absorb`에 실패를 남기고, 예상 못 한 예외의 traceback은 `.state/last-report.json`(0600)에만 둔다(자동 실행이면 `launchd.log`에도). `dev:absorb_running_marker`
+- LLM에게는 삭제 도구가 없는데 프롬프트는 철회로 비게 된 페이지를 지우라고 해서, LLM이 파일을 0바이트로 비우고 verify가 `frontmatter_invalid`로 묶음 전체를 거부했다(실제 실행 2026-11-24, work 묶음 원본 30개). 프롬프트는 "내용을 모두 비운다"로 바꾸고 삭제는 Python이 한다. 지우는 조건은 위 absorb 4단계 (1)이고, LLM이 낸 `withdrawn_src`는 믿지 않고 묶음의 `op: deleted` 원본(`SourceIndex.withdrawn`)을 기준으로 한다. `dev:withdrawn_reaper`
+- 같은 실행에서 LLM이 원본 id의 폴더 조각(`<폴더 이름>-`)을 빼고 옮겨 적어 `src_unknown`으로 묶음이 실패했다. 이 묶음의 원본 중 정확히 하나와 맞는 id만 Python이 고치므로, 같은 파일 이름의 다른 폴더 원본으로 잘못 붙을 위험은 "하나뿐" 조건과 폴더 토큰 검사로 막는다. `dev:src_id_repair`
+- `collect` 명령을 추가했다(계획에 없던 원본: GitHub, Linear, Discord, 그리고 Traycer 대화의 답과 산출물 경로. 계획은 Traycer에서 내 프롬프트만 읽었다). 계획의 원본은 모두 이 컴퓨터의 파일이라 병합된 PR, 이슈 상태, 채팅에서 정한 것이 페이지에 쌓이지 않았다. 새 원본 종류를 만들지 않고 inbox 노트로 넣어 도메인 고정, 비밀값 가림, 격리된 LLM, verify를 그대로 거치게 했다. 계정과 id는 공개 레포에 두지 않고 위키의 `collect.json`(git 제외)에서 읽는다. `dev:activity_collect`
+- 프로젝트 페이지에 `## 할 일`, `## 확인할 것`, `## 한 일`, `## 논의`, `## 자료`를, notes에 월별 작업 기록(`worklog-YYYY-MM`)을, `now.md` 초안에 같은 세 묶음을 더했다. 계획의 프로젝트 페이지는 "이번 주 무엇을 왜"와 "현재 상태"뿐이라 끝낸 일과 남은 일이 기록으로 남지 않았다. 세 섹션은 `## 현재 상태`처럼 항목마다 src 줄을 둔다. `dev:work_sections`
+- 자동 실행이 launchd에서 실패하는 것을 `status`가 알려 준다(`launchd_failing:<코드>`, `root_tcc_protected`). 실제로 위키를 `~/Desktop` 아래로 옮긴 뒤 launchd가 종료 코드 78로 열흘 넘게 한 번도 돌지 못했는데, 스크립트가 시작도 못 해 장부·Slack·`status` 어디에도 드러나지 않았다(2026-11-14~11-25, 실행 440여 회 모두 78. 같은 폴더를 여는 시험 작업도 `Operation not permitted`). `dev:launchd_health`
 
 ## 격리 실측 (claude 2.1.318, 2026-11-06)
 

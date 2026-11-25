@@ -48,7 +48,7 @@ python3 -m unittest discover -s skills/linear-traycer-workflow/tests
 
 > /wiki init
 
-명령은 `init`(폴더·규약·로컬 git 생성), `absorb`(격리된 반영과 Slack 한 줄 알림), `note`, `query`, `status`, `schedule`(launchd 자동 실행, 직접 설치할 때만)입니다. 테스트는 `python3 -m unittest discover -s skills/wiki/tests`로 돌립니다(Python 3.9 표준 라이브러리만 사용).
+명령은 `init`(폴더·규약·로컬 git 생성), `absorb`(격리된 반영과 Slack 한 줄 알림), `collect`(GitHub·Linear·Discord 활동을 inbox 노트로 모아 한 일·할 일·확인할 것으로 쌓음), `note`, `query`, `status`, `schedule`(launchd 자동 실행, 직접 설치할 때만)입니다. 테스트는 `python3 -m unittest discover -s skills/wiki/tests`로 돌립니다(Python 3.9 표준 라이브러리만 사용).
 
 ## 🎯 핵심 기능
 

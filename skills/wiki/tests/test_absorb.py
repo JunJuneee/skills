@@ -413,6 +413,116 @@ class NotesAndWithdrawalTest(AbsorbCase):
         self.assertEqual(report["rules_removed"], 1)
 
 
+class PythonFixesTest(AbsorbCase):
+    """dev:withdrawn_reaper and dev:src_id_repair: what Python does for the
+    two things the LLM cannot do reliably (no delete tool, mis-copied ids)."""
+
+    PAGE = "personal/prefs/answer-language.md"
+
+    def first_run(self):
+        src_id = self.add_memory(self.repo, "feedback_lang.md", "답변은 한국어로.")
+        self.assertEqual(self.run_absorb(Runner(writes_pref()))["status"], "ok")
+        return src_id
+
+    def withdraw(self):
+        os.unlink(os.path.join(self.projects, prepare.fs_encode(self.repo), "memory",
+                               "feedback_lang.md"))
+
+    def add_human_notes(self):
+        """A human edit under '## 내 메모', committed by a no-op absorb."""
+        path = os.path.join(self.root, self.PAGE)
+        write(path, read(path).replace("## 내 메모\n", "## 내 메모\n\n사람 글\n"))
+        self.run_absorb(Runner(lambda r: result()), now=LATER)
+
+    @staticmethod
+    def blanks(src_id, text=""):
+        def fn(request):
+            path = os.path.join(request["cwd"], "prefs", "answer-language.md")
+            write(path, text)
+            return result([path], withdrawn=[src_id])
+        return fn
+
+    def test_blanked_page_of_withdrawn_source_is_deleted(self):
+        src_id = self.first_run()
+        self.withdraw()
+        report = self.run_absorb(Runner(self.blanks(src_id)), now=LATER)
+        self.assertEqual(report["status"], "ok", report)
+        self.assertEqual(self.entries()[src_id]["status"], "deleted")
+        self.assertFalse(self.committed(self.PAGE))
+        self.assertIn("withdrawn_page_removed:1", report["batches"][0]["warnings"])
+        self.assertEqual(report["rules_removed"], 1)
+
+    def test_page_left_as_bare_headings_is_deleted(self):
+        src_id = self.first_run()
+        self.withdraw()
+        shell = page_text("답변 언어", "pref", "personal", [],
+                          extra=[("scope", "global"), ("summary", "x")])
+        report = self.run_absorb(Runner(self.blanks(src_id, shell)), now=LATER)
+        self.assertEqual(report["status"], "ok", report)
+        self.assertFalse(self.committed(self.PAGE))
+
+    def test_page_with_a_live_source_is_not_deleted(self):
+        src_id = self.first_run()
+        self.add_memory(self.repo, "feedback_more.md", "새 선호")
+        report = self.run_absorb(Runner(self.blanks(src_id)), now=LATER)
+        self.assertEqual(report["batches"][0]["reason"], "frontmatter_invalid", report)
+        self.assertTrue(self.committed(self.PAGE))
+
+    def test_blanked_page_with_human_notes_fails_not_deleted(self):
+        src_id = self.first_run()
+        self.add_human_notes()
+        human = self.main_file(self.PAGE)
+        self.assertIn("사람 글", human)
+        self.withdraw()
+        report = self.run_absorb(Runner(self.blanks(src_id)), now=LATER + datetime.timedelta(hours=1))
+        self.assertEqual(report["batches"][0]["reason"], "my_notes_changed", report)
+        self.assertEqual(self.main_file(self.PAGE), human)
+
+    def test_bare_headings_keep_the_shell_when_notes_exist(self):
+        src_id = self.first_run()
+        self.add_human_notes()
+        self.withdraw()
+        shell = page_text("답변 언어", "pref", "personal", [],
+                          extra=[("scope", "global"), ("summary", "x")],
+                          notes="## 내 메모\n\n사람 글\n")
+        report = self.run_absorb(Runner(self.blanks(src_id, shell)),
+                                 now=LATER + datetime.timedelta(hours=1))
+        self.assertEqual(report["status"], "ok", report)
+        self.assertTrue(self.committed(self.PAGE))
+        self.assertNotIn("withdrawn_page_removed:1", report["batches"][0]["warnings"])
+
+    @staticmethod
+    def mis_copy(src_id, keep=3):
+        kind, rest = src_id.split(":", 1)
+        folder, name = rest.rsplit("/", 1)
+        parts = folder.split("-")
+        return "%s:%s/%s" % (kind, "-".join(parts[:keep] + parts[keep + 1:]), name)
+
+    def test_mis_copied_src_id_is_repaired(self):
+        src_id = self.add_memory(self.repo, "feedback_lang.md", "답변은 한국어로.")
+        wrong = self.mis_copy(src_id)
+        self.assertNotEqual(wrong, src_id)
+        report = self.run_absorb(Runner(writes_pref(
+            page_fn=lambda t, s: pref_page(t, (wrong, s[1])))))
+        self.assertEqual(report["status"], "ok", report)
+        page = self.main_file(self.PAGE)
+        self.assertIn(src_id, page)
+        self.assertNotIn(wrong, page)
+        self.assertTrue(any(w.startswith("src_id_repaired:")
+                            for w in report["batches"][0]["warnings"]))
+
+    def test_ambiguous_src_id_is_not_repaired(self):
+        self.add_memory(self.repo, "feedback_lang.md", "답변은 한국어로.")
+        other = self.make_repo("side2", "git@github.com:%s/side2.git" % ME)
+        other_id = self.add_memory(other, "feedback_lang.md", "같은 이름 다른 폴더")
+        # Only the first folder token survives: a subsequence of both folders.
+        wrong = "mem:-%s/feedback_lang.md" % prepare.fs_encode(other).split("-")[1]
+        report = self.run_absorb(Runner(writes_pref(
+            page_fn=lambda t, s: pref_page(t, (wrong, s[1])))))
+        self.assertEqual(report["batches"][0]["reason"], "src_unknown", report)
+        self.assertNotIn(other_id, self.main_file(self.PAGE) or "")
+
+
 class MergeTest(AbsorbCase):
     def setUp(self):
         AbsorbCase.setUp(self)

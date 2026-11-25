@@ -1207,6 +1207,11 @@ _SHA_RE = re.compile(r"^[0-9a-f]{40}([0-9a-f]{24})?$")
 # One "<code>:<short text>" per bullet of SKILL.md "계획과 달라진 점"; each
 # bullet ends with the same `dev:<code>` tag (tests/test_repo_hygiene.py).
 PLAN_DEVIATIONS = (
+    "activity_collect:`wiki collect` writes GitHub, Linear, Discord and local Traycer conversation activity as inbox notes (no new source kind; accounts and ids live in the wiki's git-ignored collect.json)",
+    "work_sections:project pages gain 할 일, 확인할 것, 한 일, 논의 and 자료 (per-item src, links kept), notes gain a monthly worklog, and the now.md fragment carries the same three groups",
+    "launchd_health:status reports a scheduled job that launchd cannot run (launchd_failing:<code>, root_tcc_protected for a wiki under a TCC-guarded home folder)",
+    "withdrawn_reaper:python deletes pages the LLM blanked for a withdrawn source (no delete tool); only when every cited src is withdrawn and no human notes would be lost",
+    "src_id_repair:an unknown src id that matches exactly one of the batch's own sources by kind, file name and folder tokens is rewritten before verify",
     "prompt_classify:prompts in a folder with no domain are classified "
     "(work_terms and session signals first, then a tools-off LLM; unknown stays out)",
     "claude_p_flags:restricted,acceptEdits,permission_prompts_none,"

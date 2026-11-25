@@ -506,14 +506,19 @@ def section_text(body, heading):
     return "".join(out)
 
 
-def page_is_empty(page):
-    """True when only headings and src comments are left above '## 내 메모',
-    which is what an absorb leaves after every source of a page was withdrawn."""
-    for line in common.split_my_notes(page.body)[0].splitlines():
+def body_is_empty(body):
+    """True when only headings and src comments are left above '## 내 메모'."""
+    for line in common.split_my_notes(body)[0].splitlines():
         line = common.SRC_COMMENT_RE.sub("", line).strip()
         if line and not line.startswith("#") and not line.startswith("<!--"):
             return False
     return True
+
+
+def page_is_empty(page):
+    """True when only headings and src comments are left above '## 내 메모',
+    which is what an absorb leaves after every source of a page was withdrawn."""
+    return body_is_empty(page.body)
 
 
 def live_pages(wt, domain):
@@ -608,6 +613,148 @@ def _check_page(wt, pre_sha, status, path, domain, index, other, allow, terms, p
     if domain == "personal" and personal_term_hit(terms, path, main_part, fm):
         problems.append("work_terms_hit:%s" % path)
     return True
+
+
+# ---------------------------------------------------------------------------
+# Python-side fixes of two things the LLM cannot do reliably
+# ---------------------------------------------------------------------------
+
+def _domain_page_changes(wt, pre_sha, domain, statuses):
+    """[(status, path, full)] of changed, regular, non-draft page files of
+    the domain whose status is in statuses."""
+    out = []
+    for status, path in changed_files(wt, pre_sha):
+        if (status not in statuses or not path.endswith(".md")
+                or not path.startswith(domain + "/") or _is_draft(path, domain)
+                or path.rsplit("/", 1)[-1].startswith(".")):
+            continue
+        full = os.path.join(wt, path)
+        if os.path.islink(full) or not os.path.isfile(full):
+            continue
+        out.append((status, path, full))
+    return out
+
+
+def reap_vacated_pages(wt, pre_sha, domain, index):
+    """Delete the pages the LLM emptied for a withdrawn source.
+
+    The LLM has no delete tool, so it blanks such a page instead (the prompt
+    tells it to). A page is removed only when every src it cited at pre_sha
+    is withdrawn, at least one was cited, and it was left either empty or as
+    bare headings with no human text under '## 내 메모' to lose. The removal
+    then goes through check_batch's ordinary deleted-page checks (a page
+    whose notes changed still fails there with my_notes_changed). Returns
+    the removed paths."""
+    removed = []
+    for _status, path, full in _domain_page_changes(wt, pre_sha, domain, ("M",)):
+        old = blob_at(wt, pre_sha, path)
+        if old is None:
+            continue
+        try:
+            old_text = old.decode("utf-8")
+            new_text = read_text(full)
+        except UnicodeDecodeError:
+            continue
+        ids = src_ids(before_notes(old_text))
+        if not ids or not set(ids) <= index.withdrawn:
+            continue
+        if new_text.strip():
+            _fm, err, body, _nl = page_split(new_text)
+            if err or not body_is_empty(body):
+                continue
+            # Bare headings still hold the page's '## 내 메모': keep the
+            # shell unless that is empty too.
+            if (notes_guard(old_text).startswith(HIDDEN_NOTES_MARK)
+                    or notes_guard(old_text).strip() not in ("", common.MY_NOTES_HEADING)
+                    or notes_guard(new_text).strip() not in ("", common.MY_NOTES_HEADING)):
+                continue
+        os.unlink(full)
+        removed.append(path)
+    return removed
+
+
+_ID_TOKEN_RE = re.compile(r"[-_/.\s]+")
+
+
+def _is_subsequence(short, long):
+    it = iter(long)
+    return all(token in it for token in short)
+
+
+def _split_source_id(source_id):
+    kind, _, rest = source_id.partition(":")
+    head, _, tail = rest.rpartition("/")
+    return kind, [t for t in _ID_TOKEN_RE.split(head) if t], tail
+
+
+def _same_source_id(wrong, right):
+    """True when `wrong` looks like a mis-copy of `right`: same kind and same
+    file name part, and the folder part of one is a token subsequence of the
+    other's (the LLM drops or shortens folder segments such as 'Desktop-')."""
+    if wrong == right:
+        return False
+    kind_w, head_w, tail_w = _split_source_id(wrong)
+    kind_r, head_r, tail_r = _split_source_id(right)
+    if kind_w != kind_r or not tail_w or tail_w != tail_r:
+        return False
+    short, long = (head_w, head_r) if len(head_w) <= len(head_r) else (head_r, head_w)
+    return bool(short) and _is_subsequence(short, long)
+
+
+def _rewrite_src_comments(text, replace):
+    """Apply replace(id) -> id or None to every src comment outside code
+    fences. Returns (new text, number of ids changed)."""
+    out = []
+    fence = None
+    count = [0]
+
+    def sub(match):
+        new = replace(match.group(1))
+        if not new or new == match.group(1):
+            return match.group(0)
+        count[0] += 1
+        start = match.start(1) - match.start(0)
+        end = match.end(1) - match.start(0)
+        return match.group(0)[:start] + new + match.group(0)[end:]
+
+    for line in text.splitlines(True):
+        fence, is_fence = common.fence_step(fence, line)
+        out.append(line if is_fence or fence else common.SRC_COMMENT_RE.sub(sub, line))
+    return "".join(out), count[0]
+
+
+def repair_src_ids(wt, pre_sha, domain, batch_sources, index):
+    """Fix src ids the LLM mis-copied (an unknown id that matches exactly one
+    of this batch's own sources by kind, file name and folder tokens), before
+    check_batch would fail the whole batch with src_unknown. Ambiguous or
+    unmatched ids are left alone and fail as before. Only text above
+    '## 내 메모' is touched. Returns how many ids were rewritten."""
+    live = [s["id"] for s in batch_sources if s.get("op") != "deleted"]
+    known = index.known_ids()
+    fixes = {}
+
+    def replace(source_id):
+        if source_id in known:
+            return None
+        if source_id not in fixes:
+            matches = [c for c in live if _same_source_id(source_id, c)]
+            fixes[source_id] = matches[0] if len(matches) == 1 else None
+        return fixes[source_id]
+
+    repaired = 0
+    for _status, _path, full in _domain_page_changes(wt, pre_sha, domain, ("M", "A", "?")):
+        try:
+            text = read_text(full)
+        except UnicodeDecodeError:
+            continue
+        _fm, _err, body, _nl = page_split(text)
+        head = text[:len(text) - len(body)]
+        main, notes = common.split_my_notes(body)
+        new_main, count = _rewrite_src_comments(main, replace)
+        if count:
+            common.atomic_write_text(full, head + new_main + notes)
+            repaired += count
+    return repaired
 
 
 def check_batch(wt, pre_sha, batch, entries, domains_cfg, extra_sources=()):

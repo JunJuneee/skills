@@ -882,6 +882,14 @@ def run_batch(ctx, batch, record):
         if not result.get("ok"):
             raise verify.BatchFailure([result.get("reason") or "llm_error"])
         output = verify.normalize_output(result.get("structured"), wt, batch)
+        # Two things the LLM cannot do reliably, done here before verify:
+        # delete the pages it blanked for a withdrawn source (it has no
+        # delete tool), and fix an src id it mis-copied (dev:withdrawn_reaper,
+        # dev:src_id_repair). Both are undone with the worktree if verify fails.
+        index = verify.SourceIndex(working["sources"],
+                                   list(ctx["run_sources"]) + list(batch["sources"]), domain)
+        removed = verify.reap_vacated_pages(wt, pre, domain, index)
+        repaired = verify.repair_src_ids(wt, pre, domain, batch["sources"], index)
         check = verify.check_batch(wt, pre, batch, working["sources"], ctx["domains"],
                                    extra_sources=ctx["run_sources"])
         # Names from the LLM go into frontmatter aliases, sources.json and
@@ -913,6 +921,10 @@ def run_batch(ctx, batch, record):
             and not verify._is_draft(path, domain) and path in outcome["pages"]))
         outcome["broken_links"] = check.broken_links
         outcome["warnings"] = list(check.warnings)
+        if removed:
+            outcome["warnings"].append("withdrawn_page_removed:%d" % len(removed))
+        if repaired:
+            outcome["warnings"].append("src_id_repaired:%d" % repaired)
         # Draft text and mention names stay out of the printed report.
         ctx["private"][batch_id] = {"drafts": check.drafts, "mentions": output["mentions"],
                                     "merges": output["merges"]}

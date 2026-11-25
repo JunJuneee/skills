@@ -333,10 +333,12 @@ class PlanTest(ScheduleCase):
         status = json.loads(proc.stdout.decode())
         self.assertTrue(status["schedule"]["installed"])
         self.assertFalse(status["schedule"]["bin_stale"])
+        # status only reads launchd's last exit code of the job.
+        self.assertEqual([call[0] for call in self.launchctl_calls()], ["print"])
         proc = self.run_cli("--json", "schedule", "uninstall", env=env)
         self.assertEqual(proc.returncode, 0, proc.stderr.decode())
         self.assertTrue(json.loads(proc.stdout.decode())["removed"])
-        self.assertEqual(self.launchctl_calls()[0][0], "bootout")
+        self.assertEqual(self.launchctl_calls()[-1][0], "bootout")
         proc = self.run_cli("--json", "schedule", env=env)
         self.assertEqual(proc.returncode, 1)
         self.assertEqual(json.loads(proc.stdout.decode())["reason"], "usage")
