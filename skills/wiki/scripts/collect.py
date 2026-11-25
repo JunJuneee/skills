@@ -1057,8 +1057,8 @@ def stage_activity_note(root, text):
 
 
 def publish_activity_note(root, domain, source, tmp, now):
-    """Link a staged note into inbox/<domain>/activity/ under a name that
-    was never used (a consumed note's id is never reused). An absorb that
+    """Link a staged note into inbox/<domain>/activity/<source>-<stamp>.md,
+    a name that was never used (a consumed note's id is never reused). An absorb that
     reads the inbox at that moment sees no file or the complete one."""
     inbox = os.path.join(root, common.INBOX_DIRNAME)
     base = os.path.join(inbox, domain, ACTIVITY_DIRNAME)
@@ -1067,8 +1067,19 @@ def publish_activity_note(root, domain, source, tmp, now):
             os.makedirs(path, 0o700)
         os.chmod(path, 0o700)
     stamp = now.astimezone().strftime("%Y%m%d-%H%M%S")
-    for _attempt in range(20):
-        path = os.path.join(base, "%s-%s-%s.md" % (source, stamp, os.urandom(4).hex()))
+    done = os.path.join(common.state_dir(root), "inbox-done", domain)
+    try:
+        used = set(os.listdir(done))
+    except OSError:
+        used = set()
+    for attempt in range(1, 200):
+        # A short, regular name: the absorb LLM copies it into src lines, and
+        # a random part got dropped there. A name absorb already consumed
+        # (moved to inbox-done) is skipped so its source id is never reused.
+        name = "%s-%s%s.md" % (source, stamp, "" if attempt == 1 else "-%d" % attempt)
+        if name in used:
+            continue
+        path = os.path.join(base, name)
         try:
             os.link(tmp, path)  # never replaces an existing note
         except OSError as exc:
@@ -1080,7 +1091,7 @@ def publish_activity_note(root, domain, source, tmp, now):
 
 
 def write_activity_note(root, domain, source, text, now):
-    """A new inbox/<domain>/activity/<source>-<stamp>-<random>.md (0600)."""
+    """A new inbox/<domain>/activity/<source>-<stamp>.md (0600)."""
     tmp = stage_activity_note(root, text)
     try:
         return publish_activity_note(root, domain, source, tmp, now)
