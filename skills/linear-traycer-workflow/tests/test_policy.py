@@ -240,12 +240,11 @@ class PreflightTest(unittest.TestCase):
         self.assertTrue(self.reasons(description="## 완료 기준\n없음")[1])
         self.assertTrue(self.reasons(repo=None)[1])
 
-    def test_high_risk_word_needs_an_explicit_lane(self):
-        body = "DB 마이그레이션 포함\n## 완료 기준\n- 적용된다\n"
-        self.assertTrue(self.reasons(description=body)[1])
+    def test_lane_comes_only_from_labels(self):
+        body = "DB 마이그레이션 포함, 결제 단계 권한 확인\n## 완료 기준\n- 적용된다\n"
+        # 제목·본문의 단어는 실행을 막지 않는다. 라벨이 없으면 기본 줄이다.
+        self.assertEqual(self.reasons(description=body), ("M", []))
         self.assertEqual(self.reasons(description=body, labels=["lane-l"]), ("L", []))
-        # 사람이 줄을 직접 정했으면 단어로 다시 막지 않는다.
-        self.assertEqual(self.reasons(description=body, labels=["lane-m"]), ("M", []))
         self.assertEqual(self.reasons(description=body, labels=["Lane-S"]), ("S", []))
 
     def test_issue_ids_before_the_predecessor_word_are_references(self):
@@ -306,15 +305,6 @@ class PreflightTest(unittest.TestCase):
         self.assertTrue(any("완료 기준" in r for r in self.reasons(description=ended)[1]))
         after = "## 선행 이슈\n없음\n## 참고\n- JAY-100 과 비슷함\n## 완료 기준\n- 입력 보존\n"
         self.assertEqual(self.reasons(description=after)[1], [])
-
-    def test_high_risk_words_match_whole_ascii_words(self):
-        self.assertTrue(self.reasons(title="OAuth2 access token 검증 로직 교체")[1])
-        self.assertTrue(self.reasons(title="OAuth2.0 전환")[1])
-        self.assertEqual(self.reasons(title="authors 목록 정렬")[1], [])
-        self.assertEqual(self.reasons(title="게시물 author 필드에 작성자 이름 표시")[1], [])
-        self.assertTrue(self.reasons(title="OAuth 토큰 갱신")[1])
-        self.assertTrue(self.reasons(title="auth 미들웨어 교체")[1])
-        self.assertTrue(self.reasons(title="권한 검사 변경")[1])
 
     def test_cli_exit_codes(self):
         import io

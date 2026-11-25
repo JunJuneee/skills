@@ -116,21 +116,6 @@ def predecessors(description, headings=()):
     return {match.upper() for match in found}
 
 
-def risky_words(text, words):
-    """ASCII 단어는 단어 단위로, 그 밖에는 부분 문자열로 찾는다."""
-    lowered = text.lower()
-    hits = []
-    for word in words:
-        key = word.lower()
-        if key.isascii():
-            # 뒤에 붙는 숫자는 허용한다(OAuth2). author처럼 글자가 이어지면 다른 단어다.
-            if re.search(r"(?<![a-z0-9])" + re.escape(key) + r"(?![a-z])", lowered):
-                hits.append(word)
-        elif key in lowered:
-            hits.append(word)
-    return hits
-
-
 def from_linear(node, repo, has_open_pr):
     """실행기가 Linear에서 읽은 이슈 노드를 사전 점검 입력 모양으로 바꾼다."""
     relations = node.get("inverseRelations") or {}
@@ -198,12 +183,8 @@ def check(issue, policy, project=None):
     lanes = [intake["lane_labels"][label] for label in labels if label in intake["lane_labels"]]
     if len(set(lanes)) > 1:
         reasons.append("줄 라벨이 둘 이상")
+    # 줄은 라벨로만 정한다. 제목·본문의 단어로 실행을 막지 않는다.
     lane = lanes[0] if lanes else policy["default_lane"]
-    # 사람이 줄 라벨을 직접 붙였으면 그 판단을 따른다. 라벨이 없을 때만 단어로 확인을 요청한다.
-    if not lanes:
-        hits = risky_words(title + "\n" + description, intake["high_risk_keywords"])
-        if hits:
-            reasons.append("고위험 단어(%s)가 있는데 줄 라벨이 없음. lane-s·lane-m·lane-l 중 하나로 확인해야 함" % ", ".join(hits))
     return lane, reasons
 
 

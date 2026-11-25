@@ -60,7 +60,6 @@
     "criteria_headings": ["완료 기준", "acceptance criteria", "AC"],
     "control_labels": ["owner-action", "needs-confirm", "agent-hold", "hold", "blocked", "agent-running"],
     "lane_labels": {"lane-s": "S", "lane-m": "M", "lane-l": "L"},
-    "high_risk_keywords": ["마이그레이션", "migration", "인증", "권한", "auth", "authentication", "authorization", "oauth", "결제", "payment", "billing", "데이터 삭제", "drop table"],
     "slot_timeout_hours": 24
   }
 }
