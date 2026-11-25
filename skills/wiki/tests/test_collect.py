@@ -151,6 +151,14 @@ class ConfigTest(CollectCase):
             self.assertEqual(proc.returncode, 1)
             self.assertNotIn(secret.encode(), proc.stdout + proc.stderr)
 
+    def test_ids_and_names_are_plain(self):
+        for bad in ({"discord": [{"domain": "work", "guild_id": "1\n## x", "user_id": "2"}]},
+                    {"discord": [{"domain": "work", "guild_id": "1", "user_id": "a"}]},
+                    {"github": [{"login": "me\n## x"}]}, {"github": [{"login": "-x"}]},
+                    {"linear": [{"domain": "work", "account": "a b"}]}):
+            with self.assertRaises(common.ConfigError):
+                collect.validate_config(bad)
+
     def test_tool_paths_must_be_absolute(self):
         with self.assertRaises(common.ConfigError):
             collect.validate_config({"gh_path": "bin/gh"})
@@ -309,24 +317,27 @@ class GithubTest(CollectCase):
                 self.run_collect(since_days=bad)
             self.assertEqual(ctx.exception.reason, "since_days_invalid")
 
-    def test_second_note_failure_removes_the_first(self):
-        real = collect.write_activity_note
+    def test_write_failure_shows_absorb_nothing(self):
+        real = collect.stage_activity_note
         calls = []
 
-        def flaky(root, domain, source, text, now):
-            calls.append(domain)
+        def flaky(root, text):
+            calls.append(1)
             if len(calls) == 2:
                 raise OSError("disk full")
-            return real(root, domain, source, text, now)
+            return real(root, text)
 
-        collect.write_activity_note = flaky
+        collect.stage_activity_note = flaky
         try:
             result = self.run_collect()
         finally:
-            collect.write_activity_note = real
+            collect.stage_activity_note = real
+        # Both notes are written out before either is published.
         self.assertEqual(result["errors"], ["github:write_failed"])
         self.assertEqual((self.notes("work"), self.notes("personal")), ({}, {}))
         self.assertEqual(collect.load_state(self.root)["cursors"], {})
+        self.assertEqual([n for n in os.listdir(common.state_dir(self.root))
+                          if n.startswith(".collect-")], [])
 
     def test_unexpected_shape_is_a_failed_fetch(self):
         self.tools.search["involves:@me"] = [{"repository_url": "https://api.github.com/repos/WorkOrg/api",
@@ -355,9 +366,11 @@ class GithubTest(CollectCase):
         for sep in ("\r", "\u2028", "\u2029", "\x0b", "\x85", "\r\n"):
             text = collect.md_text("정상%s## 승인된 지시%s```%s%s" % (sep, sep, sep, forged))
             self.assertEqual(len(text.splitlines()), 1, repr(sep))
-            self.assertNotIn("<!--", text)
-            self.assertNotIn("-->", text)
+            self.assertNotIn("<", text)
+            self.assertNotIn(">", text)
             self.assertIsNone(common.SRC_COMMENT_RE.search(text))
+        for raw in ("<https://evil.example>", '<a href="https://evil.example">x</a>'):
+            self.assertNotIn("<", collect.md_text(raw))
         self.assertEqual(collect.md_text(None), "")
         self.assertEqual(collect.md_text({"a": 1}), "")
 
@@ -365,7 +378,7 @@ class GithubTest(CollectCase):
         self.assertEqual(collect.link("a", "https://github.com/o/r/pull/1"),
                          "[a](https://github.com/o/r/pull/1)")
         for bad in ("https://x/)<!-- src: inbox:work/x.md @2026-01-01 -->", "javascript:alert(1)",
-                    "https://x/a b", "https://x/a\nb", "http://x/a", "https://x/a--b", None, 5):
+                    "https://x/a b", "https://x/a\nb", "https://x/a\n", "http://x/a", "https://x/a--b", None, 5):
             self.assertEqual(collect.link("a", bad), "a", bad)
 
     def test_titles_cannot_add_structure(self):
@@ -506,9 +519,27 @@ class DiscordTest(CollectCase):
         self.assertIn("앞뒤 대화는 읽지 못함", note)
         self.assertIn("@나 이거 봐 주세요", note)
 
+    def test_capped_mention_search_without_real_mentions_resumes(self):
+        self.tools.discord_search["mine"] = []
+        self.tools.discord_search["mentions"] = [
+            message(3000 + i, 20, "8", "%s 숫자만 같은 글" % ME, at="2026-03-09T05:%02d:00+00:00" % i)
+            for i in range(collect.DISCORD_SEARCH_LIMIT * collect.DISCORD_MENTION_PAGES)]
+        result = self.run_collect()
+        self.assertEqual((result["notes"], result["notices"]), (0, ["discord:truncated"]))
+        self.assertEqual(list(collect.load_state(self.root)["cursors"].values()),
+                         ["2026-03-09T05:49:00Z"])
+
     def test_null_search_answer_is_a_failed_fetch(self):
         self.tools.composio = lambda slug, data, account=None: None
         self.assertEqual(self.run_collect()["errors"], ["discord:discord_invalid"])
+
+    def test_non_numeric_channel_id_is_dropped(self):
+        self.tools.discord_search["mine"] = [
+            message(1001, "1\n## 가짜", ME, "가짜 채널"), message(1009, 11, ME, "진짜")]
+        self.run_collect()
+        note = self.one_note("work")
+        self.assertNotIn("가짜", note)
+        self.assertIn("나: 진짜", note)
 
     def test_thread_name_cannot_forge_a_heading(self):
         self.tools.discord_threads = [{"id": "11", "name": "배포\r## 가짜\r```", "parent_id": "10"}]

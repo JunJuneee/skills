@@ -175,6 +175,10 @@ def _validate_entries(source, value):
                     raise _invalid("max_channels must be 1..50")
             elif not isinstance(field, str) or not field.strip():
                 raise _invalid("%s.%s must be a non-empty string" % (source, key))
+            elif key in ("guild_id", "user_id") and not _ID_RE.fullmatch(field.strip()):
+                raise _invalid("%s.%s must be digits" % (source, key))
+            elif key in ("login", "account") and not _NAME_RE.fullmatch(field.strip()):
+                raise _invalid("%s.%s has characters that are not allowed" % (source, key))
             entry[key] = field.strip() if isinstance(field, str) else field
         for key in ENTRY_KEYS[source]:
             if key != "max_channels" and key not in entry:
@@ -321,7 +325,8 @@ class Tools(object):
     def gh_search(self, token, query, page):
         env = dict(self.environ, GH_TOKEN=token)
         code, out = self._run([self.gh, "api", "-X", "GET", "search/issues",
-                               "-f", "q=%s" % query, "-f", "per_page=100",
+                               "-f", "q=%s" % query, "-f", "sort=updated", "-f", "order=asc",
+                               "-f", "per_page=100",
                                "-f", "page=%d" % page], env=env)
         if code != 0:
             raise CollectError("gh_api_failed", "search")
@@ -375,22 +380,25 @@ def md_text(text):
     """Outside text placed inside a list item. It stays on one line (every
     Unicode line break and control character becomes a space, so it cannot
     start a heading, a fence or a list), and it cannot form a link or an
-    HTML comment (a forged `<!-- src: -->` line)."""
+    HTML comment (a forged `<!-- src: -->` line), tag or autolink."""
     if not isinstance(text, str):
         return ""
     text = "".join(" " if unicodedata.category(ch) in ("Cc", "Zl", "Zp") else ch for ch in text)
     text = " ".join(text.split())
+    # No angle brackets at all: no HTML comment, tag or <autolink>.
     return (text.replace("[", "(").replace("]", ")")
-            .replace("<!--", "<!- -").replace("-->", "- ->"))
+            .replace("<", "\u2039").replace(">", "\u203a"))
 
 
-_URL_RE = re.compile(r"^https://[A-Za-z0-9.-]+(/[^\s()<>\[\]\"`]*)?$")
+_URL_RE = re.compile(r"https://[A-Za-z0-9.-]+(/[^\s()<>\[\]\"`]*)?")
+_ID_RE = re.compile(r"[0-9]{1,24}")
+_NAME_RE = re.compile(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,99}")
 
 
 def link(label, url):
     """A markdown link only for a plain https URL (nothing that could close
     the link early); otherwise the label alone."""
-    if isinstance(url, str) and _URL_RE.match(url) and "--" not in url:
+    if isinstance(url, str) and _URL_RE.fullmatch(url) and "--" not in url:
         return "[%s](%s)" % (md_text(label), url)
     return md_text(label)
 
@@ -656,7 +664,8 @@ def _discord_hits(data):
     hits = []
     for group in (data.get("messages") or []) if isinstance(data, dict) else []:
         message = group[0] if isinstance(group, list) and group else group
-        if isinstance(message, dict) and message.get("id") and message.get("channel_id"):
+        if (isinstance(message, dict) and _ID_RE.fullmatch(str(message.get("id") or ""))
+                and _ID_RE.fullmatch(str(message.get("channel_id") or ""))):
             hits.append(message)
     return hits
 
@@ -701,7 +710,9 @@ def collect_discord(tools, entry, since, now, owners=None):
                 if any((u or {}).get("id") == me for u in (m.get("mentions") or []))
                 and (m.get("author") or {}).get("id") != me]
     if not mine and not mentions:
-        return {}, {"events": 0}
+        # Nothing of mine, but a capped search still has to move on from
+        # where it stopped, not jump to now.
+        return {}, ({"events": 0, "resume": resume, "truncated": 1} if resume else {"events": 0})
     channels = collections.OrderedDict()
     for kind, hits in (("mine", mine), ("mentions", mentions)):
         for message in hits:
@@ -741,7 +752,7 @@ def collect_discord(tools, entry, since, now, owners=None):
                     raise CollectError("discord_invalid", "messages")
                 merged = dict(row["hits"])
                 merged.update((str(m["id"]), m) for m in listed
-                              if isinstance(m, dict) and m.get("id"))
+                              if isinstance(m, dict) and _ID_RE.fullmatch(str(m.get("id") or "")))
                 messages = list(merged.values())
             except CollectError:
                 unread += 1
@@ -816,21 +827,10 @@ def source_key(source, entry):
     return "discord:%s:%s" % (entry["domain"], entry["guild_id"])
 
 
-def write_activity_note(root, domain, source, text, now):
-    """A new inbox/<domain>/activity/<source>-<stamp>-<random>.md (0600).
-
-    The whole text is written to a private temp file under .state/ first
-    and then linked into the inbox, so an absorb reading the inbox at that
-    moment sees either no file or the complete one. The random part keeps
-    a name from being used twice (a consumed note's id is never reused)."""
-    inbox = os.path.join(root, common.INBOX_DIRNAME)
-    base = os.path.join(inbox, domain, ACTIVITY_DIRNAME)
-    for path in (inbox, os.path.join(inbox, domain), base):
-        if not os.path.isdir(path):
-            os.makedirs(path, 0o700)
-        os.chmod(path, 0o700)
+def stage_activity_note(root, text):
+    """The whole note in a private temp file under .state/ (same volume as
+    the inbox). Returns its path."""
     common.ensure_private_dir(common.state_dir(root))
-    stamp = now.astimezone().strftime("%Y%m%d-%H%M%S")
     fd, tmp = tempfile.mkstemp(prefix=".collect-", suffix=".tmp", dir=common.state_dir(root))
     try:
         with os.fdopen(fd, "w", encoding="utf-8") as handle:
@@ -838,21 +838,49 @@ def write_activity_note(root, domain, source, text, now):
             handle.flush()
             os.fsync(handle.fileno())
         os.chmod(tmp, 0o600)
-        for _attempt in range(20):
-            path = os.path.join(base, "%s-%s-%s.md" % (source, stamp, os.urandom(4).hex()))
-            try:
-                os.link(tmp, path)  # never replaces an existing note
-            except OSError as exc:
-                if exc.errno == errno.EEXIST:
-                    continue
-                raise
-            return path
-    finally:
+    except BaseException:
+        _unlink(tmp)
+        raise
+    return tmp
+
+
+def publish_activity_note(root, domain, source, tmp, now):
+    """Link a staged note into inbox/<domain>/activity/ under a name that
+    was never used (a consumed note's id is never reused). An absorb that
+    reads the inbox at that moment sees no file or the complete one."""
+    inbox = os.path.join(root, common.INBOX_DIRNAME)
+    base = os.path.join(inbox, domain, ACTIVITY_DIRNAME)
+    for path in (inbox, os.path.join(inbox, domain), base):
+        if not os.path.isdir(path):
+            os.makedirs(path, 0o700)
+        os.chmod(path, 0o700)
+    stamp = now.astimezone().strftime("%Y%m%d-%H%M%S")
+    for _attempt in range(20):
+        path = os.path.join(base, "%s-%s-%s.md" % (source, stamp, os.urandom(4).hex()))
         try:
-            os.unlink(tmp)
-        except OSError:
-            pass
+            os.link(tmp, path)  # never replaces an existing note
+        except OSError as exc:
+            if exc.errno == errno.EEXIST:
+                continue
+            raise
+        return path
     raise common.WikiError("note_name_taken", "could not pick a free activity note name")
+
+
+def write_activity_note(root, domain, source, text, now):
+    """A new inbox/<domain>/activity/<source>-<stamp>-<random>.md (0600)."""
+    tmp = stage_activity_note(root, text)
+    try:
+        return publish_activity_note(root, domain, source, tmp, now)
+    finally:
+        _unlink(tmp)
+
+
+def _unlink(path):
+    try:
+        os.unlink(path)
+    except OSError:
+        pass
 
 
 @contextlib.contextmanager
@@ -899,16 +927,22 @@ def _fetch_one(root, source, entry, key, state, cfg, tools, owners, now, dry_run
         counts["window_clamped"] = 1
     if dry_run:
         return len(notes), counts
-    written = []
+    # Every note is written out in full before the first one is shown to
+    # absorb, so the usual failure (disk, permissions) happens while nothing
+    # is in the inbox yet. A link that fails after another succeeded leaves
+    # that note in place (absorb may already have taken it) and keeps the
+    # cursor: the retry repeats it rather than losing the other one.
+    staged = []
     try:
-        for domain in sorted(notes):
-            written.append(write_activity_note(root, domain, source, notes[domain], now))
+        try:
+            for domain in sorted(notes):
+                staged.append((domain, stage_activity_note(root, notes[domain])))
+            for domain, tmp in staged:
+                publish_activity_note(root, domain, source, tmp, now)
+        finally:
+            for _domain, tmp in staged:
+                _unlink(tmp)
     except (common.WikiError, IOError, OSError):
-        for path in written:  # all or nothing, so a retry does not duplicate
-            try:
-                os.unlink(path)
-            except OSError:
-                pass
         raise CollectError("write_failed", source)
     resume = counts.get("resume")
     state["cursors"][key] = iso_z(resume if resume and since <= resume < now else now)
