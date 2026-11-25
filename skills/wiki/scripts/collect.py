@@ -69,6 +69,8 @@ ENTRY_KEYS = {
 }
 DEFAULT_FIRST_RUN_DAYS = 3
 MAX_WINDOW_DAYS = 30  # a cursor older than this is not followed all the way back
+MAX_BACKFILL_DAYS = 7  # one --from/--to slice (a longer one would be cut at the note cap)
+BACKFILL_LINE = "(지난 기간을 뒤늦게 채운 기록이다. 이 기간 뒤에 일어난 일은 여기 없다.)"
 TOOL_TIMEOUT = 120
 
 NOTE_MAX_CHARS = 60000
@@ -98,7 +100,7 @@ TOOL_DIRS = ("~/.local/bin", "/opt/homebrew/bin", "/usr/local/bin")
 LINEAR_QUERY = """query {
   viewer { name }
   changed: issues(first: %(first)d, orderBy: updatedAt%(after)s, filter: {
-    updatedAt: {gte: "%(since)s"},
+    %(when)s,
     or: [{assignee: {isMe: {eq: true}}}, {creator: {isMe: {eq: true}}}]
   }) {
     pageInfo { hasNextPage endCursor }
@@ -469,10 +471,24 @@ def collect_github(tools, entry, since, now, owners):
     """{domain: note text} and counts for one GitHub login."""
     login = entry["login"]
     token = tools.gh_token(login)
-    touched, full = _github_search(tools, token, "involves:@me updated:>=%s" % iso_z(since))
-    waiting, _more = _github_search(tools, token, "is:pr is:open review-requested:@me")
+    backfill = bool(entry.get("_backfill"))
+    if backfill:
+        # A past slice is asked for by what happened in it (merged, opened,
+        # closed), not by the last update, which may be much later.
+        span = "%s..%s" % (iso_z(since), iso_z(now))
+        found, full = collections.OrderedDict(), False
+        for what in ("merged", "created", "closed"):
+            items, capped = _github_search(tools, token, "involves:@me %s:%s" % (what, span))
+            full = full or capped
+            for item in items:
+                found.setdefault(item.get("html_url"), item)
+        touched, waiting = list(found.values()), []
+    else:
+        touched, full = _github_search(tools, token,
+                                       "involves:@me updated:>=%s" % iso_z(since))
+        waiting, _more = _github_search(tools, token, "is:pr is:open review-requested:@me")
     resume = None
-    if full:
+    if full and not backfill:
         # Newer items did not fit: the next run starts at the last one seen.
         resume = max([t for t in (parse_time(i.get("updated_at")) for i in touched) if t]
                      or [since])
@@ -480,7 +496,8 @@ def collect_github(tools, entry, since, now, owners):
     asked = set(item.get("html_url") for item in waiting if item.get("html_url"))
     lowered = dict((owner.lower(), domain) for owner, domain in owners.items())
     groups = dict((domain, collections.OrderedDict(
-        (name, []) for name in ("merged", "opened", "open", "closed", "issues", "review")))
+        (name, []) for name in ("merged", "opened", "made", "open", "closed", "issues",
+                                "review")))
         for domain in common.DOMAINS)
     skipped = 0
 
@@ -502,6 +519,14 @@ def collect_github(tools, entry, since, now, owners):
             groups[domain]["issues"].append((item, mine))
             continue
         merged = parse_time(pull.get("merged_at"))
+        if backfill:
+            if merged and since <= merged <= now:
+                groups[domain]["merged"].append((item, mine))
+            elif not merged and closed and since <= closed <= now:
+                groups[domain]["closed"].append((item, mine))
+            elif created and since <= created <= now:
+                groups[domain]["made"].append((item, mine))
+            continue
         if merged and merged >= since:
             groups[domain]["merged"].append((item, mine))
         elif merged:
@@ -532,6 +557,8 @@ def collect_github(tools, entry, since, now, owners):
         events += count
         notes[domain] = render(_github_note(domain, login, since, now, group))
     counts = {"events": events, "skipped_unknown_owner": skipped, "reviews_seen": sorted(asked)}
+    if full and backfill:
+        counts["truncated"] = 1
     if resume:
         counts["resume"] = resume
         counts["truncated"] = 1
@@ -541,6 +568,7 @@ def collect_github(tools, entry, since, now, owners):
 GITHUB_SECTIONS = (
     ("merged", "병합된 PR", True),
     ("opened", "새로 연 PR (아직 열려 있음)", True),
+    ("made", "이 기간에 새로 연 PR (그 뒤의 상태는 여기 없음)", True),
     ("open", "계속 열려 있는 PR (기간 중 갱신)", False),
     ("closed", "병합 없이 닫힌 PR", False),
     ("issues", "이슈", False),
@@ -586,8 +614,16 @@ def _github_note(domain, login, since, now, group):
 
 def collect_linear(tools, entry, since, now, owners=None):
     changed, still_open, after, more, open_more = [], [], None, False, True
+    backfill = bool(entry.get("_backfill"))
+    when = 'updatedAt: {gte: "%s"}' % iso_z(since)
+    if backfill:
+        # A past slice: whatever was made, finished or touched inside it,
+        # even if it was touched again later.
+        span = '{gte: "%s", lte: "%s"}' % (iso_z(since), iso_z(now))
+        when = "and: [{or: [{updatedAt: %s}, {createdAt: %s}, {completedAt: %s}, " \
+               "{canceledAt: %s}]}]" % (span, span, span, span)
     for page in range(LINEAR_MAX_PAGES):
-        query = LINEAR_QUERY % {"first": LINEAR_CHANGED_FIRST, "since": iso_z(since),
+        query = LINEAR_QUERY % {"first": LINEAR_CHANGED_FIRST, "when": when,
                                 "after": ', after: "%s"' % after if after else ""}
         data = tools.composio("LINEAR_RUN_QUERY_OR_MUTATION", {"query_or_mutation": query},
                               entry["account"])
@@ -616,9 +652,9 @@ def collect_linear(tools, entry, since, now, owners=None):
     for node in changed:
         finished = parse_time(node.get("completedAt")) or parse_time(node.get("canceledAt"))
         made = parse_time(node.get("createdAt"))
-        if finished and finished >= since:
+        if finished and since <= finished <= now:
             done.append(node)
-        elif made and made >= since:
+        elif made and since <= made <= now:
             created.append(node)
         else:
             moved.append(node)
@@ -634,7 +670,7 @@ def collect_linear(tools, entry, since, now, owners=None):
             lines.append(_linear_line(node, when=True))
             for comment in ((node.get("comments") or {}).get("nodes") or []):
                 at = parse_time((comment or {}).get("createdAt"))
-                if not at or at < since:
+                if not at or at < since or at > now:
                     continue
                 user = comment.get("user") or {}
                 lines.append("  - 댓글 %s %s: %s" % (
@@ -643,14 +679,17 @@ def collect_linear(tools, entry, since, now, owners=None):
         lines.append("")
     if more:
         lines += ["(바뀐 이슈가 %d개를 넘어 나머지는 이 기록에 없다)" % len(changed), ""]
-    if open_more:
+    if backfill:
+        pass  # today's open list says nothing about a past slice
+    elif open_more:
         # An incomplete list must not read as "everything else is done".
         lines += ["## 지금 내 담당 미완료 이슈 (일부 %d개만, 전체 목록이 아니다)" % len(still_open), "",
                   "(목록에 없다고 끝난 이슈로 보지 않는다)", ""]
     else:
         lines += ["## 지금 내 담당 미완료 이슈 (%d, 수집 시점 전체 목록)" % len(still_open), ""]
-    lines += [_linear_line(node, when=False) for node in still_open]
-    lines.append("")
+    if not backfill:
+        lines += [_linear_line(node, when=False) for node in still_open]
+        lines.append("")
     counts = {"events": len(changed)}
     if more:
         counts["truncated"] = 1
@@ -716,6 +755,8 @@ def collect_discord(tools, entry, since, now, owners=None):
     guild, me = entry["guild_id"], entry["user_id"]
     names = {}  # channel or thread id -> (name, parent id)
     base = {"guild_id": guild, "min_id": snowflake(since)}
+    if entry.get("_backfill"):
+        base["max_id"] = snowflake(now)
     mine, full_mine = _discord_search(tools, dict(base, author_id=[me]),
                                       DISCORD_AUTHOR_PAGES, names)
     found, full_found = _discord_search(tools, dict(base, content=me),
@@ -1143,13 +1184,18 @@ def collect_lock(root):
 
 
 def _fetch_one(root, source, entry, key, state, cfg, tools, owners, now, dry_run, since_days,
-               environ):
+               environ, window=None):
     """(notes written, counts). Raises CollectError; the cursor has moved
-    only when every note of this entry was published."""
+    only when every note of this entry was published. With `window`
+    (since, until) it fills a past slice and leaves the cursor alone."""
     since = window_start(state["cursors"].get(key), now, cfg["first_run_days"])
     clamped = bool(state["cursors"].get(key)) and \
         (parse_time(state["cursors"][key]) or now) < since
-    if since_days:
+    if window:
+        since, now = window
+        clamped = False
+        entry = dict(entry, _backfill=True)
+    elif since_days:
         # A manual window only reaches further back, never past the cursor.
         since = min(since, now - datetime.timedelta(days=since_days))
     if source == "github":
@@ -1166,6 +1212,10 @@ def _fetch_one(root, source, entry, key, state, cfg, tools, owners, now, dry_run
         raise CollectError("invalid_response", source)
     if clamped:
         counts["window_clamped"] = 1
+    if window:
+        counts.pop("resume", None)
+        notes = dict((domain, text.replace("\n\n", "\n\n%s\n\n" % BACKFILL_LINE, 1))
+                     for domain, text in notes.items())
     if dry_run:
         return len(notes), counts
     # Every note is written out in full before the first one is shown to
@@ -1179,12 +1229,18 @@ def _fetch_one(root, source, entry, key, state, cfg, tools, owners, now, dry_run
             for domain in sorted(notes):
                 staged.append((domain, stage_activity_note(root, notes[domain])))
             for domain, tmp in staged:
-                publish_activity_note(root, domain, source, tmp, now)
+                path = publish_activity_note(root, domain, source, tmp, now)
+                if window:
+                    # absorb dates an inbox note by its file time: a filled
+                    # slice is dated by the slice, not by today.
+                    os.utime(path, (now.timestamp(), now.timestamp()))
         finally:
             for _domain, tmp in staged:
                 _unlink(tmp)
     except (common.WikiError, IOError, OSError):
         raise CollectError("write_failed", source)
+    if window:
+        return len(notes), counts
     resume = counts.get("resume")
     state["cursors"][key] = iso_z(resume if resume and since <= resume < now else now)
     if source == "github":
@@ -1196,7 +1252,27 @@ COUNT_EXTRAS = ("skipped_unknown_owner", "skipped_unknown_domain", "unread_chann
                 "truncated", "window_clamped")
 
 
-def collect(root, environ=None, now=None, tools=None, dry_run=False, since_days=None):
+def backfill_window(day_from, day_to, now):
+    """(since, until) for local dates day_from..day_to (both inclusive,
+    YYYY-MM-DD), the end capped at now."""
+    try:
+        first = datetime.datetime.strptime(day_from, "%Y-%m-%d")
+        last = datetime.datetime.strptime(day_to, "%Y-%m-%d")
+    except (TypeError, ValueError):
+        raise common.WikiError("window_invalid", "--from and --to are YYYY-MM-DD dates")
+    since = first.astimezone()                                    # local midnight
+    until = (last + datetime.timedelta(days=1)).astimezone() - datetime.timedelta(seconds=1)
+    until = min(until, now)
+    if not since < until:
+        raise common.WikiError("window_invalid", "--from must be before --to and in the past")
+    if until - since > datetime.timedelta(days=MAX_BACKFILL_DAYS):
+        raise common.WikiError("window_invalid",
+                               "one slice is at most %d days" % MAX_BACKFILL_DAYS)
+    return since.astimezone(UTC), until.astimezone(UTC)
+
+
+def collect(root, environ=None, now=None, tools=None, dry_run=False, since_days=None,
+            window=None, only=None):
     """Fetch every configured source once. Returns counts and reason codes:
 
       {"status": "not_configured" | "disabled" | "busy" | "ok" | "partial" | "failed",
@@ -1205,9 +1281,15 @@ def collect(root, environ=None, now=None, tools=None, dry_run=False, since_days=
        "sources": {"<source>": {"events": n, "notes": n, "failed": n}}}
 
     A source that raises keeps its cursor. dry_run fetches and counts but
-    writes no note and moves no cursor."""
+    writes no note and moves no cursor. window=(day_from, day_to) fills a
+    past slice instead: notes are written, cursors and last_run are not.
+    only=("github", ...) limits the run to those sources."""
     environ = os.environ if environ is None else environ
     now = now or utc_now()
+    if window is not None:
+        if since_days is not None:
+            raise common.WikiError("window_invalid", "--since-days cannot be used with --from/--to")
+        window = backfill_window(window[0], window[1], now)
     result = collections.OrderedDict([("status", "ok"), ("notes", 0), ("events", 0),
                                       ("errors", []), ("notices", []),
                                       ("sources", collections.OrderedDict())])
@@ -1215,10 +1297,16 @@ def collect(root, environ=None, now=None, tools=None, dry_run=False, since_days=
                                    or not 1 <= since_days <= MAX_WINDOW_DAYS):
         raise common.WikiError("since_days_invalid",
                                "--since-days must be 1..%d" % MAX_WINDOW_DAYS)
+    if only is not None and (not only or any(name not in SOURCES for name in only)):
+        raise common.WikiError("source_invalid", "--source takes %s" % ", ".join(SOURCES))
     cfg = load_config(root)
     if cfg is None:
         result["status"] = "not_configured"
         return result
+    if only is not None:
+        cfg = collections.OrderedDict(
+            (key, [] if key in SOURCES and key not in only else value)
+            for key, value in cfg.items())
     if not cfg["enabled"]:
         result["status"] = "disabled"
         return result
@@ -1226,10 +1314,11 @@ def collect(root, environ=None, now=None, tools=None, dry_run=False, since_days=
         if not held:
             result["status"] = "busy"
             return result
-        return _collect_locked(root, environ, now, tools, dry_run, since_days, cfg, result)
+        return _collect_locked(root, environ, now, tools, dry_run, since_days, cfg, result,
+                               window)
 
 
-def _collect_locked(root, environ, now, tools, dry_run, since_days, cfg, result):
+def _collect_locked(root, environ, now, tools, dry_run, since_days, cfg, result, window=None):
     owners = common.load_domains(root).get("owners") or {}
     state = load_state(root)
     tools = tools or Tools(cfg, environ)
@@ -1241,7 +1330,7 @@ def _collect_locked(root, environ, now, tools, dry_run, since_days, cfg, result)
             key = source_key(source, entry)
             try:
                 written, counts = _fetch_one(root, source, entry, key, state, cfg, tools, owners,
-                                             now, dry_run, since_days, environ)
+                                             now, dry_run, since_days, environ, window)
             except CollectError as exc:
                 failed += 1
                 tally["failed"] += 1
@@ -1259,7 +1348,7 @@ def _collect_locked(root, environ, now, tools, dry_run, since_days, cfg, result)
             result["sources"][source] = tally
             result["events"] += tally["events"]
             result["notes"] += tally["notes"]
-    if not dry_run:
+    if not dry_run and not window:
         state["last_run"] = collections.OrderedDict([
             ("at", iso_z(now)), ("notes", result["notes"]), ("events", result["events"]),
             ("errors", list(result["errors"])), ("notices", list(result["notices"]))])

@@ -34,7 +34,7 @@ python3 "$SKILL_DIR/scripts/wiki.py" <명령> [옵션]
 |---|---|
 | `init` | 폴더, `SCHEMA.md`, `domains.json`, `settings.json`, `now.md`, `about-me.md`, `.gitignore`, 로컬 git(원격 없음, `main`)을 만듦 |
 | `absorb [--scheduled] [--rules-path FILE] [--no-notify] [--no-collect]` | 먼저 `collect`를 돌린 뒤(설정했을 때만) 바뀐 원본을 모아 격리된 `claude -p`로 페이지를 갱신하고 검증 후 `main`에 병합. 끝나면 장부에 기록하고 Slack 한 줄을 보냄 |
-| `collect [--dry-run] [--since-days N]` | GitHub·Linear·Discord·Traycer에서 마지막 수집 이후의 활동을 가져와 `inbox/<domain>/activity/`에 노트로 씀. 다음 absorb가 반영 |
+| `collect [--dry-run] [--since-days N] [--from 날짜 --to 날짜] [--source 이름,…]` | GitHub·Linear·Discord·Traycer에서 마지막 수집 이후의 활동을 가져와 `inbox/<domain>/activity/`에 노트로 씀. 다음 absorb가 반영 |
 | `note --domain work\|personal <글>` | `inbox/<domain>/`에 메모를 넣음. 다음 absorb가 반영 |
 | `query [--domain work\|personal] [--limit N] <글>` | 현재 레포 도메인(또는 `--domain`)의 페이지에서 찾음 |
 | `status` | 지금 도는 absorb(있으면 시작 시각), 마지막 실행, 장부의 마지막 기록(상태와 사유 코드), 마지막 수집, 다음 자동 실행 시각(설치했을 때만), 반영 대기 수(숫자만), 경고(플레이스홀더, 고정 스크립트 버전 차이, 알림 실패, 위키 폴더 권한, 수집 실패, 자동 실행이 launchd에서 실패 중) |
@@ -135,6 +135,7 @@ python3 "$SKILL_DIR/scripts/wiki.py" collect              # 노트를 쓰고 커
 - 노트는 `inbox/<domain>/activity/<소스>-<날짜-시각>.md`(0600. 이미 반영돼 `inbox-done`으로 간 이름은 다시 쓰지 않고 `-2`를 붙인다. 이름에 무작위 조각을 넣었더니 absorb의 LLM이 src 줄로 옮겨 적다 빠뜨려 묶음이 `src_unknown`으로 실패했다)이고 하나가 60,000자를 넘으면 자른다. 소스마다 커서를 `.state/collect-state.json`에 두고, 성공했을 때만 옮긴다. 실패한 소스는 다음 실행이 같은 기간을 다시 가져오고 다른 소스는 그대로 쓴다. 커서가 30일보다 오래됐으면 30일 전부터만 가져오고 `collect_window_clamped:<소스>` 경고를 남긴다.
 - 한 번에 가져오는 양에는 상한이 있다(GitHub 300건, Discord 내 글 200건·멘션 50건, Linear 바뀐 이슈 300건, Traycer 도메인당 대화 40개). GitHub, Discord, Traycer는 상한에 닿으면 커서를 마지막으로 가져온 항목 시각에 두어 다음 실행이 이어서 가져오고, Linear는 넘친 만큼이 그 기록에 없다. 어느 쪽이든 `collect_truncated:<소스>` 경고가 남는다. `--since-days N`(1~30)은 커서보다 더 과거로만 넓힌다.
 - 노트는 `.state/`의 임시 파일에 다 쓴 뒤 inbox로 옮기므로 absorb가 쓰다 만 노트를 읽지 않는다. 한 소스가 두 도메인에 노트를 낼 때는 둘 다 임시 파일로 다 쓴 뒤에 게시하므로, 쓰기 실패(디스크, 권한)는 inbox에 아무것도 없는 상태에서 난다. 그때는 커서를 그대로 두고 다음 실행이 다시 쓴다. 게시(link) 단계에서 하나만 실패하면 먼저 게시된 노트는 지우지 않고(absorb가 이미 읽었을 수 있다) 커서를 두므로 다음 실행에 그 노트가 한 번 겹친다. 수집은 한 번에 하나만 돈다(`.state/collect.lock`, 겹치면 `busy`로 건너뜀).
+- 지난 기간 채우기: `collect --from 2026-01-01 --to 2026-01-03`은 그 날짜들(현지 날짜, 양끝 포함, 한 번에 7일까지)의 활동만 노트로 쓰고 커서와 마지막 수집 기록은 건드리지 않는다. `--since-days`는 지금까지를 한 노트에 담아 긴 기간이면 상한에 잘리므로, 빠진 기간은 이 옵션으로 며칠씩 나눠 채운다. GitHub는 그 기간에 병합·생성·닫힌 것, Linear는 그 기간에 만들거나 끝내거나 바뀐 것, Discord와 Traycer는 그 기간의 글만 가져온다. 노트 둘째 줄에 뒤늦게 채운 기록이라고 적고, 파일 시각을 그 기간의 끝으로 맞춘다(absorb가 원본 날짜로 쓴다). Linear의 "지금 미완료 목록"과 GitHub의 리뷰 요청 목록은 넣지 않는다. 이 방식은 이어받기가 없어서 상한에 닿으면(`collect_truncated:<소스>`) 구간을 더 짧게 잡는다. `--source github,linear`처럼 소스를 골라 돌릴 수 있다(대화가 많은 Traycer는 하루씩).
 - absorb는 시작할 때 `collect`를 먼저 돌린다(`--no-collect`로 끔). 자동 실행에서는 20시간 규칙으로 그날 돌 차례일 때만 돈다. 수집이 실패해도 absorb는 그대로 돌고, 사유는 `collect_failed:<소스>:<사유>` 경고로 남는다(`gh_missing`, `gh_token_failed`, `gh_api_failed`, `composio_missing`, `composio_failed`, `tool_timeout`, `linear_invalid`, `discord_invalid`, `traycer_missing`, `traycer_schema`, `traycer_unavailable`, `invalid_response`, `write_failed`, `collect_config_invalid`).
 - 세션에 보이는 것은 건수와 사유 코드뿐이다. 제목과 본문은 노트에만 있다. 설정 오류 문구에도 잘못 쓴 키 이름을 넣지 않는다(계정 이름이나 비밀값일 수 있다).
 - 밖에서 온 글(PR 제목·본문, 이슈 제목·댓글, 다른 사람의 채팅, 채널 이름)은 노트에 넣을 때 한 줄로 만들고(모든 줄바꿈·제어 문자를 공백으로), 링크 괄호와 HTML 주석 표시를 바꿔 제목·코드 블록·`<!-- src: -->` 줄을 흉내 내지 못하게 한다. 링크는 평범한 `https://` 주소일 때만 건다.

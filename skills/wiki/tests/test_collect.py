@@ -369,6 +369,103 @@ class GithubTest(CollectCase):
                           if n.startswith(".collect-")], [])
 
 
+class BackfillTest(CollectCase):
+    """--from/--to: a past slice, cursors untouched."""
+
+    WINDOW = ("2026-03-01", "2026-03-03")
+
+    def test_window_bounds(self):
+        since, until = collect.backfill_window("2026-03-01", "2026-03-03", NOW)
+        self.assertEqual(until - since, datetime.timedelta(days=3, seconds=-1))
+        self.assertEqual(since.astimezone().strftime("%Y-%m-%d %H:%M:%S"), "2026-03-01 00:00:00")
+        # The end never passes now.
+        _since, until = collect.backfill_window("2026-03-09", "2026-03-12", NOW)
+        self.assertEqual(until, NOW)
+        for bad in (("2026-03-03", "2026-03-01"), ("2026-03-11", "2026-03-12"),
+                    ("2026-02-01", "2026-02-20"), ("x", "2026-03-01"), (None, None)):
+            with self.assertRaises(common.WikiError) as ctx:
+                collect.backfill_window(bad[0], bad[1], NOW)
+            self.assertEqual(ctx.exception.reason, "window_invalid", bad)
+        with self.assertRaises(common.WikiError):
+            self.run_collect(window=self.WINDOW, since_days=2)
+
+    def test_github_slice_by_what_happened_in_it(self):
+        self.configure(github=[{"login": "me-login"}])
+        local_noon = lambda day: collect.iso_z(
+            datetime.datetime.strptime(day + " 12:00", "%Y-%m-%d %H:%M").astimezone())
+        self.tools.search["involves:@me merged:"] = [
+            pr("WorkOrg/api", 1, "구간 안 병합", merged=local_noon("2026-03-02"),
+               closed=local_noon("2026-03-02"), created=local_noon("2026-02-20"))]
+        self.tools.search["involves:@me created:"] = [
+            pr("WorkOrg/api", 2, "구간 안에 열고 나중에 병합", created=local_noon("2026-03-03"),
+               merged=local_noon("2026-03-08"), closed=local_noon("2026-03-08")),
+            pr("WorkOrg/api", 1, "구간 안 병합", merged=local_noon("2026-03-02"),
+               closed=local_noon("2026-03-02"), created=local_noon("2026-02-20"))]
+        self.tools.search["is:pr is:open review-requested"] = [
+            pr("WorkOrg/api", 7, "지금의 리뷰 요청", user="other", state="open")]
+        self.run_collect()  # a normal run first: it owns the cursor
+        cursors = dict(collect.load_state(self.root)["cursors"])
+        last_run = collect.load_state(self.root)["last_run"]
+        for path in [os.path.join(self.root, "inbox", "work", "activity", n)
+                     for n in self.notes("work")]:
+            os.unlink(path)
+        self.tools.calls = []
+        result = self.run_collect(window=self.WINDOW)
+        self.assertEqual((result["status"], result["notes"]), ("ok", 1))
+        queries = [call[2] for call in self.tools.calls if call[0] == "gh_search"]
+        self.assertEqual([q.split(":")[1].split(" ")[1] for q in queries],
+                         ["merged", "created", "closed"])
+        self.assertTrue(all(".." in q and "updated" not in q for q in queries))
+        note = self.one_note("work")
+        self.assertEqual(note.splitlines()[2], collect.BACKFILL_LINE)
+        self.assertIn("## 병합된 PR (1)", note)                     # listed once
+        self.assertIn("## 이 기간에 새로 연 PR (그 뒤의 상태는 여기 없음) (1)", note)
+        self.assertNotIn("지금의 리뷰 요청", note)
+        state = collect.load_state(self.root)
+        self.assertEqual((state["cursors"], state["last_run"]), (cursors, last_run))
+        base = os.path.join(self.root, "inbox", "work", "activity")
+        name = os.listdir(base)[0]
+        _since, until = collect.backfill_window(self.WINDOW[0], self.WINDOW[1], NOW)
+        self.assertEqual(int(os.stat(os.path.join(base, name)).st_mtime), int(until.timestamp()))
+        self.assertTrue(name.startswith("github-20260303-235959"))
+
+    def test_linear_and_discord_are_bounded(self):
+        self.configure(linear=[{"domain": "work", "account": "acct-1"}],
+                       discord=[{"domain": "work", "guild_id": GUILD, "user_id": ME}])
+        self.tools.linear = {"changed": {"pageInfo": {"hasNextPage": False}, "nodes": [{
+            "identifier": "T-1", "title": "구간 안에 끝남", "url": "https://linear.example/T-1",
+            "createdAt": "2026-01-01T00:00:00.000Z", "updatedAt": "2026-03-09T00:00:00.000Z",
+            "completedAt": "2026-03-02T03:00:00.000Z", "canceledAt": None,
+            "state": {"name": "Done", "type": "completed"}, "comments": {"nodes": [
+                {"createdAt": "2026-03-09T00:00:00.000Z", "body": "구간 뒤 댓글",
+                 "user": {"name": "동료", "isMe": False}}]}}]},
+            "open": {"pageInfo": {"hasNextPage": False}, "nodes": [
+                {"identifier": "T-9", "title": "지금 열린 일", "state": {"name": "Todo"}}]}}
+        self.run_collect(window=self.WINDOW)
+        note = [text for text in self.notes("work").values() if "Linear" in text][0]
+        self.assertIn("## 끝난 이슈 (완료·취소) (1)", note)
+        self.assertNotIn("구간 뒤 댓글", note)
+        self.assertNotIn("지금 열린 일", note)
+        self.assertNotIn("미완료 이슈", note)
+        query = [c[1]["query_or_mutation"] for c in self.tools.calls
+                 if c[0] == "LINEAR_RUN_QUERY_OR_MUTATION"][0]
+        self.assertIn("completedAt: {gte:", query)
+        self.assertIn("lte:", query)
+        searches = [c[1] for c in self.tools.calls if c[0] == "DISCORDBOT_SEARCH_GUILD_MESSAGES"]
+        self.assertTrue(searches and all("max_id" in data for data in searches))
+        self.assertEqual(collect.load_state(self.root)["cursors"], {})
+
+    def test_only_some_sources(self):
+        self.configure(github=[{"login": "me-login"}],
+                       linear=[{"domain": "work", "account": "acct-1"}])
+        result = self.run_collect(only=("github",))
+        self.assertEqual(list(result["sources"]), ["github"])
+        self.assertFalse([c for c in self.tools.calls if c[0] == "LINEAR_RUN_QUERY_OR_MUTATION"])
+        with self.assertRaises(common.WikiError) as ctx:
+            self.run_collect(only=("nope",))
+        self.assertEqual(ctx.exception.reason, "source_invalid")
+
+
 class LinearTest(CollectCase):
     def setUp(self):
         CollectCase.setUp(self)

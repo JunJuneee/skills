@@ -268,7 +268,12 @@ def cmd_collect(args, environ):
 
     root = common.resolve_root(args.root, environ)
     _require_wiki(root)
-    result = collect.collect(root, environ, dry_run=args.dry_run, since_days=args.since_days)
+    if bool(args.day_from) != bool(args.day_to):
+        raise common.WikiError("window_invalid", "give --from and --to together")
+    window = (args.day_from, args.day_to) if args.day_from else None
+    only = tuple(name.strip() for name in args.source.split(",")) if args.source else None
+    result = collect.collect(root, environ, dry_run=args.dry_run, since_days=args.since_days,
+                             window=window, only=only)
     ok = result["status"] != "failed"
     if args.json:
         sys.stdout.write(common.dumps_json(dict(result, ok=ok)))
@@ -709,6 +714,12 @@ def build_parser():
                            help="fetch and count, write no note and move no cursor")
     p_collect.add_argument("--since-days", type=int, default=None,
                            help="look back this many days instead of the saved cursor")
+    p_collect.add_argument("--from", dest="day_from", default=None, metavar="YYYY-MM-DD",
+                           help="fill a past slice (with --to); cursors are left alone")
+    p_collect.add_argument("--source", default=None, metavar="NAMES",
+                           help="only these sources, comma separated (github,linear,discord,traycer)")
+    p_collect.add_argument("--to", dest="day_to", default=None, metavar="YYYY-MM-DD",
+                           help="last day of the slice, inclusive")
     p_collect.set_defaults(func=cmd_collect)
 
     p_note = sub.add_parser("note", parents=[opts], help="drop a human note into inbox/<domain>/")
