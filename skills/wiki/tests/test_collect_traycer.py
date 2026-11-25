@@ -167,6 +167,34 @@ class TraycerTest(TraycerCase):
         self.assertEqual(self.run_collect()["errors"], ["traycer:traycer_schema"])
         self.assertEqual(collect.load_state(self.root)["cursors"], {})
 
+    def test_missing_task_database_is_a_failed_fetch(self):
+        os.unlink(self.epics_db)
+        self.assertEqual(self.run_collect()["errors"], ["traycer:traycer_missing"])
+
+    def test_full_domain_resumes_at_the_first_conversation_left_out(self):
+        self.epic("epic-home", "장난감", ["MeUser"])
+        total = collect.TRAYCER_MAX_CHATS + 2
+        for i in range(total):
+            self.chat("epic-home", "c%02d" % i, "대화 %02d" % i, [
+                ("user", 0, "2026-03-09T03:%02d:00Z" % i, "요청 %02d" % i)])
+        result = self.run_collect()
+        self.assertEqual(result["notices"], ["traycer:truncated"])
+        note = self.note("personal")
+        self.assertIn("요청 00", note)
+        self.assertIn("요청 39", note)
+        self.assertNotIn("요청 40", note)
+        self.assertEqual(collect.load_state(self.root)["cursors"],
+                         {"traycer:local": "2026-03-09T03:40:00Z"})
+
+    def test_exactly_full_domain_is_not_called_truncated(self):
+        self.epic("epic-home", "장난감", ["MeUser"])
+        for i in range(collect.TRAYCER_MAX_CHATS):
+            self.chat("epic-home", "c%02d" % i, "대화 %02d" % i, [
+                ("user", 0, "2026-03-09T03:%02d:00Z" % i, "요청 %02d" % i)])
+        result = self.run_collect()
+        self.assertEqual(result["notices"], [])
+        self.assertNotIn("다음 수집에 들어온다", self.note("personal"))
+
     def test_flag_must_be_a_boolean(self):
         self.assertEqual(collect.validate_config({"traycer": False})["traycer"], [])
         with self.assertRaises(common.ConfigError):
