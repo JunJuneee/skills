@@ -225,7 +225,7 @@ def cmd_absorb(args, environ):
     root = common.resolve_root(args.root, environ)
     rules_path = os.path.abspath(os.path.expanduser(args.rules_path)) if args.rules_path else None
     report = schedule.run_absorb(root, environ, scheduled=args.scheduled, rules_path=rules_path,
-                                 send=not args.no_notify)
+                                 send=not args.no_notify, do_collect=not args.no_collect)
     if report is None:
         # Scheduled tick that is not due (20-hour rule), lock busy or no
         # wiki: silent, so launchd.log does not grow 48 lines a day.
@@ -261,6 +261,23 @@ def cmd_absorb(args, environ):
         if sent.get("mode") == "slack" and not sent.get("sent"):
             sys.stderr.write("알림 실패: %s\n" % sent.get("reason"))
     return EXIT_OK if report.get("ok") else EXIT_ERROR
+
+
+def cmd_collect(args, environ):
+    import collect
+
+    root = common.resolve_root(args.root, environ)
+    _require_wiki(root)
+    result = collect.collect(root, environ, dry_run=args.dry_run, since_days=args.since_days)
+    ok = result["status"] != "failed"
+    if args.json:
+        sys.stdout.write(common.dumps_json(dict(result, ok=ok)))
+    else:
+        # Counts and reason codes only: titles and bodies stay in the notes.
+        print(collect.summary_line(result) + (" (dry-run, 쓰지 않음)" if args.dry_run else ""))
+        for error in result["errors"]:
+            sys.stderr.write("경고: collect_failed:%s\n" % error)
+    return EXIT_OK if ok else EXIT_ERROR
 
 
 def cmd_prompts(args, environ):
@@ -508,6 +525,28 @@ def status_info(root, environ, now_epoch=None):
     if info["schedule"].get("bin_stale"):
         warnings.append("bin_stale")
     if info["schedule"].get("installed"):
+        if schedule.root_protected(root, environ):
+            warnings.append("root_tcc_protected")
+        # Tests point LaunchAgents at a temp folder; the real launchd is
+        # asked only for the real folder or an injected launchctl.
+        if environ.get(schedule.ENV_LAUNCHCTL) or not environ.get(schedule.ENV_LAUNCH_AGENTS):
+            code = schedule.job_last_exit(environ, info["schedule"].get("label"))
+            if code:
+                warnings.append("launchd_failing:%d" % code)
+    try:
+        import collect
+
+        cfg = collect.load_config(root)
+        last = collect.load_state(root).get("last_run")
+        info["collect"] = collections.OrderedDict([
+            ("configured", cfg is not None), ("enabled", bool(cfg and cfg["enabled"])),
+            ("last_run", last if isinstance(last, dict) else None)])
+        if isinstance(last, dict):
+            warnings += ["collect_failed:%s" % error for error in last.get("errors") or []]
+    except common.WikiError as exc:
+        info["collect"] = None
+        warnings.append(exc.reason)
+    if info["schedule"].get("installed"):
         try:
             import notify
 
@@ -565,6 +604,15 @@ def cmd_status(args, environ):
     if pending:
         print("반영 대기: work %d · personal %d · 판정 불가 %d · 격리 %d" % (
             pending["work"], pending["personal"], pending["unresolved"], pending["quarantined"]))
+    gathered = info.get("collect")
+    if gathered and gathered["configured"]:
+        last_run = gathered.get("last_run") or {}
+        print("외부 활동 수집: %s%s" % (
+            "켜짐" if gathered["enabled"] else "꺼짐",
+            " · 마지막 %s · 노트 %s" % (last_run.get("at"), last_run.get("notes"))
+            if last_run else " · 아직 실행 안 함"))
+    else:
+        print("외부 활동 수집: 설정 없음 (collect.json)")
     sched = info["schedule"]
     if sched.get("installed"):
         print("자동 실행: 설치됨 (%s, 고정 스크립트 %s)" % (sched.get("label"),
@@ -651,7 +699,17 @@ def build_parser():
     p_absorb.add_argument("--verbose", action="store_true",
                           help="print the full report (page paths, source ids); local "
                                "debugging only, never in a shared or public-repo session")
+    p_absorb.add_argument("--no-collect", action="store_true",
+                          help="skip `wiki collect` (outside activity) before absorb")
     p_absorb.set_defaults(func=cmd_absorb)
+
+    p_collect = sub.add_parser("collect", parents=[opts],
+                               help="fetch GitHub/Linear/Discord activity into inbox notes")
+    p_collect.add_argument("--dry-run", action="store_true",
+                           help="fetch and count, write no note and move no cursor")
+    p_collect.add_argument("--since-days", type=int, default=None,
+                           help="look back this many days instead of the saved cursor")
+    p_collect.set_defaults(func=cmd_collect)
 
     p_note = sub.add_parser("note", parents=[opts], help="drop a human note into inbox/<domain>/")
     p_note.add_argument("--domain", required=True, choices=common.DOMAINS)

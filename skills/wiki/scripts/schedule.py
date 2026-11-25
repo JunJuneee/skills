@@ -383,6 +383,38 @@ def launchctl_path(environ, override=None):
     return override or environ.get(ENV_LAUNCHCTL) or LAUNCHCTL
 
 
+PROTECTED_HOME_DIRS = ("Desktop", "Documents", "Downloads")
+_LAST_EXIT_RE = re.compile(r"last exit code = (\d+)")
+
+
+def root_protected(root, environ):
+    """True when the wiki sits under a home folder macOS guards (TCC). A
+    launchd job is then refused both its log file (exit 78) and the wiki
+    itself, and the scheduled absorb never runs."""
+    home = os.path.realpath(_home(environ))
+    real = os.path.realpath(root)
+    for name in PROTECTED_HOME_DIRS:
+        base = os.path.join(home, name)
+        if real == base or real.startswith(base + os.sep):
+            return True
+    return False
+
+
+def job_last_exit(environ, label, launchctl=None, uid=None):
+    """launchd's last exit code of the loaded job, or None (not loaded,
+    never run, launchctl not usable)."""
+    tool = launchctl_path(environ, launchctl)
+    target = "gui/%d/%s" % (os.getuid() if uid is None else uid, label)
+    try:
+        proc = _launchctl(tool, ["print", target], check=False)
+    except common.WikiError:
+        return None
+    if proc.returncode != 0:
+        return None
+    match = _LAST_EXIT_RE.search(proc.stdout.decode("utf-8", "replace"))
+    return int(match.group(1)) if match else None
+
+
 def _launchctl(launchctl, args, check=True):
     try:
         proc = subprocess.run([launchctl] + list(args), stdout=subprocess.PIPE,
@@ -483,6 +515,8 @@ def plan(root, environ, claude=None, rules_path=None, candidates=None, probe=Non
     guard = common.domains_guard(common.load_domains(root), root)
     if guard:
         warnings.append(guard)
+    if root_protected(root, environ):
+        warnings.append("root_tcc_protected")
     result["warnings"] = warnings
     return result
 
@@ -720,13 +754,29 @@ def _failed_report(reason):
     return report
 
 
+def run_collect(root, environ, collect_fn=None):
+    """Outside activity into inbox notes before absorb reads the inbox.
+    Never raises: a collect that fails leaves absorb to run on what is
+    already there, and the reason codes go into the report's warnings."""
+    if collect_fn is None:
+        import collect
+        collect_fn = collect.collect
+    try:
+        return collect_fn(root, environ)
+    except common.WikiError as exc:
+        return {"status": "failed", "notes": 0, "events": 0, "errors": [exc.reason]}
+    except Exception:
+        return {"status": "failed", "notes": 0, "events": 0, "errors": ["internal_error"]}
+
+
 def run_absorb(root, environ, scheduled=False, rules_path=None, send=True, absorb_fn=None,
-               notify_fn=None, clock=None):
+               notify_fn=None, clock=None, collect_fn=None, do_collect=True):
     """absorb with the ledger and the Slack line around it.
 
     Returns the report, or None for a silent scheduled skip (not due, lock
-    busy, no wiki). Order: run, ledger, notify, ledger notify field, so a
-    crash in notify never makes the run count twice or run again."""
+    busy, no wiki). Order: collect, run, ledger, notify, ledger notify
+    field, so a crash in notify never makes the run count twice or run
+    again. collect runs only once the run is due (not on every tick)."""
     clock = clock or time.time
     if scheduled:
         if not common.is_initialized(root) or not os.path.isdir(os.path.join(root, ".git")):
@@ -742,6 +792,9 @@ def run_absorb(root, environ, scheduled=False, rules_path=None, send=True, absor
         import absorb
         absorb_fn = absorb.absorb
     started = clock()
+    collected = None
+    if do_collect and common.is_initialized(root):
+        collected = run_collect(root, environ, collect_fn)
     try:
         report = absorb_fn(root, environ, rules_path=rules_path, scheduled=scheduled)
     except common.LockBusy:
@@ -764,6 +817,11 @@ def run_absorb(root, environ, scheduled=False, rules_path=None, send=True, absor
         report = _failed_report("internal_error")
         report["traceback"] = trace
     report.setdefault("warnings", [])
+    if collected and collected.get("status") not in ("not_configured", "disabled"):
+        import collect
+        report["collect"] = collections.OrderedDict(
+            (key, collected.get(key)) for key in ("status", "notes", "events", "errors"))
+        report["warnings"] += collect.warning_codes(collected)
     entry = make_entry(report, started, clock(), scheduled)
     try:
         record_run(root, entry)

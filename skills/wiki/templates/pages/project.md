@@ -26,6 +26,21 @@ updated: 2026-01-01
 - <memory·handoff에서 온 현재 상태>
 <!-- src: mem:<project-folder>/<file>.md @2026-01-01 -->
 
+## 할 일
+
+- <아직 끝나지 않은 일> ([<owner>/<repo>#1](https://github.com/<owner>/<repo>/pull/1))
+<!-- src: inbox:personal/activity/github-20260101-000000.md @2026-01-01 -->
+
+## 확인할 것
+
+- <답하거나 검토하거나 결과를 봐야 하는 것>
+<!-- src: inbox:personal/activity/github-20260101-000000.md @2026-01-01 -->
+
+## 한 일
+
+- 2026-01-01 <끝낸 일과 그 결과> ([<owner>/<repo>#1](https://github.com/<owner>/<repo>/pull/1))
+<!-- src: inbox:personal/activity/github-20260101-000000.md @2026-01-01 -->
+
 ## 실측값과 함정
 
 - [[personal/notes/<project-name>-notes|실측값과 함정]]
