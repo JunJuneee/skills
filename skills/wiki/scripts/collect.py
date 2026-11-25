@@ -590,7 +590,11 @@ def _github_note(domain, login, since, now, group):
             facts = []
             merged = parse_time(pull.get("merged_at"))
             closed = parse_time(item.get("closed_at"))
-            if merged:
+            if name == "made":
+                # Chosen for being opened in the slice; a later merge or
+                # close belongs to a later record.
+                facts.append("열림 %s" % local(parse_time(item.get("created_at"))))
+            elif merged:
                 facts.append("병합 %s" % local(merged))
             elif closed:
                 facts.append("닫힘 %s" % local(closed))
@@ -667,7 +671,7 @@ def collect_linear(tools, entry, since, now, owners=None):
             continue
         lines += ["## %s (%d)" % (title, len(nodes)), ""]
         for node in nodes:
-            lines.append(_linear_line(node, when=True))
+            lines.append(_linear_line(node, when=True, until=now if backfill else None))
             for comment in ((node.get("comments") or {}).get("nodes") or []):
                 at = parse_time((comment or {}).get("createdAt"))
                 if not at or at < since or at > now:
@@ -696,9 +700,11 @@ def collect_linear(tools, entry, since, now, owners=None):
     return {entry["domain"]: render(lines)}, counts
 
 
-def _linear_line(node, when):
+def _linear_line(node, when, until=None):
+    """until (a filled past slice): the state is today's, so it is labelled
+    so, and a finish or update after the slice is left out."""
     state = node.get("state") or {}
-    facts = ["상태 %s" % md_text(state.get("name") or "?")]
+    facts = ["%s %s" % ("지금 상태" if until else "상태", md_text(state.get("name") or "?"))]
     project = (node.get("project") or {}).get("name")
     if project:
         facts.append("프로젝트 %s" % md_text(project))
@@ -710,9 +716,14 @@ def _linear_line(node, when):
         if assignee and not assignee.get("isMe"):
             facts.append("담당 %s" % md_text(assignee.get("name") or "?"))
         finished = parse_time(node.get("completedAt")) or parse_time(node.get("canceledAt"))
-        if finished:
+        if finished and (until is None or finished <= until):
             facts.append("끝남 %s" % local(finished))
-        facts.append("갱신 %s" % local(parse_time(node.get("updatedAt"))))
+        updated = parse_time(node.get("updatedAt"))
+        if until is None or (updated and updated <= until):
+            facts.append("갱신 %s" % local(updated))
+        made = parse_time(node.get("createdAt"))
+        if until is not None and made:
+            facts.append("만듦 %s" % local(made))
     return "- %s %s — %s" % (link(node.get("identifier") or "?", node.get("url")),
                              md_text(node.get("title")), " · ".join(facts))
 
@@ -1004,6 +1015,12 @@ def collect_traycer(tools, entry, since, now, owners):
                 "WHERE c.lifecycle_state != 'deleted' AND d.tier IN ('user', 'assistant') "
                 "AND d.created_at >= ? AND d.created_at <= ? ORDER BY d.created_at, d.id",
                 (since_ms, now_ms)).fetchall()
+            # Conversations a person ever asked something in (the others are
+            # agent-to-agent: their parent carries the request).
+            asked = set((str(epic), str(chat)) for epic, chat in conn.execute(
+                "SELECT DISTINCT c.epic_id, c.chat_id FROM search_doc d "
+                "JOIN search_chat c ON c.chat_key = d.chat_key "
+                "WHERE d.tier = 'user' AND d.inter_agent = 0 AND d.created_at <= ?", (now_ms,)))
         finally:
             conn.close()
     except sqlite3.Error:
@@ -1026,7 +1043,7 @@ def collect_traycer(tools, entry, since, now, owners):
     # Oldest conversation first: when a domain is full, the rest waits for
     # the next run, which starts where the first one left out began.
     for (epic_id, chat_id), chat in sorted(chats.items(), key=lambda kv: kv[1]["first"]):
-        if not chat["prompts"]:
+        if (epic_id, chat_id) not in asked:
             continue  # an agent-to-agent conversation: its parent carries the request
         domain, _title = epics.get(epic_id) or (None, "")
         if domain not in by_domain:
@@ -1229,11 +1246,12 @@ def _fetch_one(root, source, entry, key, state, cfg, tools, owners, now, dry_run
             for domain in sorted(notes):
                 staged.append((domain, stage_activity_note(root, notes[domain])))
             for domain, tmp in staged:
-                path = publish_activity_note(root, domain, source, tmp, now)
                 if window:
                     # absorb dates an inbox note by its file time: a filled
-                    # slice is dated by the slice, not by today.
-                    os.utime(path, (now.timestamp(), now.timestamp()))
+                    # slice is dated by the slice, not by today. Set before
+                    # the note is visible (the link shares the file).
+                    os.utime(tmp, (now.timestamp(), now.timestamp()))
+                publish_activity_note(root, domain, source, tmp, now)
         finally:
             for _domain, tmp in staged:
                 _unlink(tmp)
@@ -1260,14 +1278,15 @@ def backfill_window(day_from, day_to, now):
         last = datetime.datetime.strptime(day_to, "%Y-%m-%d")
     except (TypeError, ValueError):
         raise common.WikiError("window_invalid", "--from and --to are YYYY-MM-DD dates")
-    since = first.astimezone()                                    # local midnight
-    until = (last + datetime.timedelta(days=1)).astimezone() - datetime.timedelta(seconds=1)
-    until = min(until, now)
-    if not since < until:
-        raise common.WikiError("window_invalid", "--from must be before --to and in the past")
-    if until - since > datetime.timedelta(days=MAX_BACKFILL_DAYS):
+    if (last - first).days >= MAX_BACKFILL_DAYS:
         raise common.WikiError("window_invalid",
                                "one slice is at most %d days" % MAX_BACKFILL_DAYS)
+    # Local midnight to the next local midnight: nothing in the last second
+    # of the last day falls outside.
+    since = first.astimezone()
+    until = min((last + datetime.timedelta(days=1)).astimezone(), now)
+    if not since < until:
+        raise common.WikiError("window_invalid", "--from must be before --to and in the past")
     return since.astimezone(UTC), until.astimezone(UTC)
 
 

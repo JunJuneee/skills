@@ -376,13 +376,13 @@ class BackfillTest(CollectCase):
 
     def test_window_bounds(self):
         since, until = collect.backfill_window("2026-03-01", "2026-03-03", NOW)
-        self.assertEqual(until - since, datetime.timedelta(days=3, seconds=-1))
+        self.assertEqual(until - since, datetime.timedelta(days=3))  # midnight to midnight
         self.assertEqual(since.astimezone().strftime("%Y-%m-%d %H:%M:%S"), "2026-03-01 00:00:00")
         # The end never passes now.
         _since, until = collect.backfill_window("2026-03-09", "2026-03-12", NOW)
         self.assertEqual(until, NOW)
         for bad in (("2026-03-03", "2026-03-01"), ("2026-03-11", "2026-03-12"),
-                    ("2026-02-01", "2026-02-20"), ("x", "2026-03-01"), (None, None)):
+                    ("2026-02-01", "2026-02-08"), ("x", "2026-03-01"), (None, None)):
             with self.assertRaises(common.WikiError) as ctx:
                 collect.backfill_window(bad[0], bad[1], NOW)
             self.assertEqual(ctx.exception.reason, "window_invalid", bad)
@@ -427,7 +427,8 @@ class BackfillTest(CollectCase):
         name = os.listdir(base)[0]
         _since, until = collect.backfill_window(self.WINDOW[0], self.WINDOW[1], NOW)
         self.assertEqual(int(os.stat(os.path.join(base, name)).st_mtime), int(until.timestamp()))
-        self.assertTrue(name.startswith("github-20260303-235959"))
+        self.assertTrue(name.startswith("github-20260304-000000"))
+        self.assertNotIn("병합 03-08", note)  # what happened after the slice is not shown
 
     def test_linear_and_discord_are_bounded(self):
         self.configure(linear=[{"domain": "work", "account": "acct-1"}],
@@ -444,6 +445,8 @@ class BackfillTest(CollectCase):
         self.run_collect(window=self.WINDOW)
         note = [text for text in self.notes("work").values() if "Linear" in text][0]
         self.assertIn("## 끝난 이슈 (완료·취소) (1)", note)
+        self.assertIn("지금 상태 Done", note)
+        self.assertNotIn("갱신 03-09", note)
         self.assertNotIn("구간 뒤 댓글", note)
         self.assertNotIn("지금 열린 일", note)
         self.assertNotIn("미완료 이슈", note)
