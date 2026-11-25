@@ -127,12 +127,16 @@ python3 "$SKILL_DIR/scripts/wiki.py" collect              # 노트를 쓰고 커
   }
   ```
 
-- GitHub: `gh auth token --user <login>`으로 받은 토큰으로 `involves:@me`인 PR·이슈 중 기간 안에 바뀐 것과, 지금 리뷰 요청 받은 PR을 찾는다. 항목의 도메인은 레포 소유자로 정한다(`domains.json`의 `owners`). 목록에 없는 소유자의 항목은 넣지 않고 건수만 센다(`skipped_unknown_owner`).
+- GitHub: `gh auth token --user <login>`으로 받은 토큰으로 `involves:@me`인 PR·이슈 중 기간 안에 바뀐 것과, 지금 리뷰 요청 받은 PR을 찾는다(리뷰 요청은 지난 수집에 없던 것이 생겼을 때만 새 활동으로 센다). 항목의 도메인은 레포 소유자로 정한다(`domains.json`의 `owners`). 목록에 없는 소유자의 항목은 넣지 않고 건수만 센다(`skipped_unknown_owner`).
 - Linear: composio CLI의 `LINEAR_RUN_QUERY_OR_MUTATION`으로 내가 담당이거나 만든 이슈 중 기간 안에 바뀐 것(최근 댓글 포함)과, 지금 내 담당 미완료 이슈 전체 목록을 읽는다. 조회 쿼리 하나뿐이고 쓰기는 하지 않는다.
-- Discord: composio CLI의 `DISCORDBOT_SEARCH_GUILD_MESSAGES`로 내가 쓴 글과 나를 멘션한 글을 찾고, 그 채널·스레드의 대화를 `DISCORDBOT_LIST_MESSAGES`로 읽는다(대화가 많은 순으로 `max_channels`, 기본 12곳, 채널당 100개). 읽지 못한 채널은 노트의 "못 읽은 채널"과 결과의 `unread_channels`에 남긴다. DM은 읽지 못한다.
-- 노트는 `inbox/<domain>/activity/<소스>-<날짜-시각>.md`(0600)이고 하나가 60,000자를 넘으면 자른다. 소스마다 커서를 `.state/collect-state.json`에 두고, 성공했을 때만 옮긴다. 실패한 소스는 다음 실행이 같은 기간을 다시 가져오고 다른 소스는 그대로 쓴다. 커서가 30일보다 오래됐으면 30일 전부터만 가져온다.
-- absorb는 시작할 때 `collect`를 먼저 돌린다(`--no-collect`로 끔). 자동 실행에서는 20시간 규칙으로 그날 돌 차례일 때만 돈다. 수집이 실패해도 absorb는 그대로 돌고, 사유는 `collect_failed:<소스>:<사유>` 경고로 남는다(`gh_missing`, `gh_token_failed`, `gh_api_failed`, `composio_missing`, `composio_failed`, `tool_timeout`, `linear_invalid`, `write_failed`, `collect_config_invalid`).
-- 세션에 보이는 것은 건수와 사유 코드뿐이다. 제목과 본문은 노트에만 있다.
+- Discord: composio CLI의 `DISCORDBOT_SEARCH_GUILD_MESSAGES`로 내가 쓴 글과 나를 멘션한 글을 찾고, 그 채널·스레드의 대화를 `DISCORDBOT_LIST_MESSAGES`로 읽는다(대화가 많은 순으로 `max_channels`, 기본 12곳, 채널당 100개). 앞뒤 대화를 읽지 못한 채널과 상한 밖의 채널도 검색에 걸린 내 글과 멘션은 그대로 넣고, 읽지 못한 곳 수를 노트의 "못 읽은 채널"과 결과의 `unread_channels`에 남긴다. DM은 읽지 못한다.
+- 노트는 `inbox/<domain>/activity/<소스>-<날짜-시각>.md`(0600)이고 하나가 60,000자를 넘으면 자른다. 소스마다 커서를 `.state/collect-state.json`에 두고, 성공했을 때만 옮긴다. 실패한 소스는 다음 실행이 같은 기간을 다시 가져오고 다른 소스는 그대로 쓴다. 커서가 30일보다 오래됐으면 30일 전부터만 가져오고 `collect_window_clamped:<소스>` 경고를 남긴다.
+- 한 번에 가져오는 양에는 상한이 있다(GitHub 300건, Discord 내 글 200건·멘션 50건, Linear 바뀐 이슈 300건). GitHub와 Discord는 상한에 닿으면 커서를 마지막으로 가져온 항목 시각에 두어 다음 실행이 이어서 가져오고, Linear는 넘친 만큼이 그 기록에 없다. 어느 쪽이든 `collect_truncated:<소스>` 경고가 남는다. `--since-days N`(1~30)은 커서보다 더 과거로만 넓힌다.
+- 노트는 `.state/`의 임시 파일에 다 쓴 뒤 inbox로 옮기므로 absorb가 쓰다 만 노트를 읽지 않는다. 한 소스의 노트 중 하나라도 쓰지 못하면 그 소스의 노트를 모두 지우고 커서를 그대로 두어 다음 실행이 겹치지 않게 다시 쓴다. 수집은 한 번에 하나만 돈다(`.state/collect.lock`, 겹치면 `busy`로 건너뜀).
+- absorb는 시작할 때 `collect`를 먼저 돌린다(`--no-collect`로 끔). 자동 실행에서는 20시간 규칙으로 그날 돌 차례일 때만 돈다. 수집이 실패해도 absorb는 그대로 돌고, 사유는 `collect_failed:<소스>:<사유>` 경고로 남는다(`gh_missing`, `gh_token_failed`, `gh_api_failed`, `composio_missing`, `composio_failed`, `tool_timeout`, `linear_invalid`, `discord_invalid`, `invalid_response`, `write_failed`, `collect_config_invalid`).
+- 세션에 보이는 것은 건수와 사유 코드뿐이다. 제목과 본문은 노트에만 있다. 설정 오류 문구에도 잘못 쓴 키 이름을 넣지 않는다(계정 이름이나 비밀값일 수 있다).
+- 밖에서 온 글(PR 제목·본문, 이슈 제목·댓글, 다른 사람의 채팅, 채널 이름)은 노트에 넣을 때 한 줄로 만들고(모든 줄바꿈·제어 문자를 공백으로), 링크 괄호와 HTML 주석 표시를 바꿔 제목·코드 블록·`<!-- src: -->` 줄을 흉내 내지 못하게 한다. 링크는 평범한 `https://` 주소일 때만 건다.
+- 도메인은 설정을 믿는다. Linear 워크스페이스와 Discord 서버는 `collect.json`에 적은 `domain`으로, GitHub는 레포 소유자로 간다. 회사 일을 개인 소유 레포나 `personal`로 적은 워크스페이스에서 하면 그 내용은 personal로 들어가고, 그 뒤는 기존 `work_terms` 검사만 막는다.
 - 활동 노트가 페이지에서 어디로 가는지는 `templates/absorb_prompt.md`의 "활동 기록을 페이지로 옮기는 규칙"과 `SCHEMA.md`에 있다: 프로젝트 페이지의 `## 할 일`, `## 확인할 것`, `## 한 일`, 월별 작업 기록 노트 `notes/worklog-YYYY-MM.md`, 루트 `now.md`의 도메인별 할 일·확인할 것·최근 한 일.
 - 이미 있는 위키는 `SCHEMA.md`와 `.gitignore`가 init 때의 사본이므로 `templates/SCHEMA.md`와 `templates/wiki-gitignore.txt`에 맞춰 직접 고쳐 커밋한다(absorb의 LLM은 위키에 커밋된 `SCHEMA.md`를 읽는다).
 
