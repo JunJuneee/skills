@@ -7,15 +7,14 @@ description: 개인 맥락 위키를 다룬다. init으로 work·personal 폴더
 
 `SKILL.md`가 있는 디렉터리를 `SKILL_DIR`로 쓴다. 모든 명령은 같은 진입점 하나로 실행한다. Claude Code에서는 `/wiki <명령>`, Codex에서는 `$wiki`로 부르며 실행 방법은 같다.
 
-이 컴퓨터의 기본 위키는 GitHub 클론 `$HOME/Desktop/github/llm-wiki`다. 사용자가 다른 위치를 지정하지 않으면 각 명령을 실행하는 셸에서 `WIKI_ROOT="$HOME/Desktop/github/llm-wiki"`를 설정한다. 예약 작업도 이 클론을 사용한다. `~/wiki`는 이전 위키이므로 기본 대상으로 쓰지 않는다.
+기본 위키는 `~/wiki`다(GitHub 클론을 이 자리에 둔다). `WIKI_ROOT`를 따로 설정하지 않아도 명령, 예약 작업, 세션 훅이 모두 이 폴더를 쓴다. macOS가 보호하는 홈 폴더(`~/Desktop`, `~/Documents`, `~/Downloads`) 아래에 두면 launchd 작업이 폴더를 열지 못하므로, 그쪽에 경로가 필요하면 `~/wiki`를 가리키는 심볼릭 링크만 둔다(스크립트는 실제 경로로 풀어 쓴다).
 
 ```bash
 SKILL_DIR='<이 SKILL.md가 있는 디렉터리>'
-export WIKI_ROOT="$HOME/Desktop/github/llm-wiki"
 python3 "$SKILL_DIR/scripts/wiki.py" <명령> [옵션]
 ```
 
-- 스크립트의 위치 우선순위는 `--root`, 환경변수 `WIKI_ROOT`, `~/wiki`다. 빈 값은 없는 것으로 본다. 위의 기본 경로를 각 셸에서 설정하고, 다른 위키를 명시적으로 요청한 경우에만 `--root`로 지정한다.
+- 스크립트의 위치 우선순위는 `--root`, 환경변수 `WIKI_ROOT`, `~/wiki`다. 빈 값은 없는 것으로 본다. 다른 위키를 명시적으로 요청한 경우에만 `--root`로 지정한다.
 - `--json`을 붙이면 결과를 JSON 한 개로 받는다. 실패하면 `reason` 코드가 있다.
 - `absorb`가 세션에 보여 주는 것(글, `--json` 모두)은 상태, 사유 코드, 숫자뿐이다. 페이지 경로·원본 id·경고의 세부는 `<위키>/.state/last-report.json`(0600)에만 쓴다. `--verbose`는 전체를 보여 주므로 공유 세션이나 공개 레포 세션에서 쓰지 않는다.
 - Python 3.9 표준 라이브러리만 쓴다. `/usr/bin/python3`로도 돈다.
