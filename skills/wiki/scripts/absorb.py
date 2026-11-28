@@ -270,13 +270,19 @@ def probe_claude(claude_path, env, timeout=PROBE_TIMEOUT):
 
 
 def build_argv(claude_path, staging_dir, model, budget, schema_text):
-    return [
+    """argv of one isolated LLM step. staging_dir None (consolidate: no
+    sources to read, the pages are in the cwd) leaves out --add-dir and
+    changes nothing else."""
+    argv = [
         claude_path, "-p",
         "--restricted",
         "--strict-mcp-config",
         "--setting-sources", "",
         "--tools", LLM_TOOLS,
-        "--add-dir", staging_dir,
+    ]
+    if staging_dir is not None:
+        argv += ["--add-dir", staging_dir]
+    return argv + [
         "--permission-mode", "acceptEdits",
         "--permission-prompts", "none",
         "--no-session-persistence",
@@ -356,8 +362,8 @@ class ClaudeRunner(object):
         if request.get("tools_off"):
             argv = build_classify_argv(self.claude_path, self.model, self.budget, schema_text)
         else:
-            argv = build_argv(self.claude_path, request["staging_dir"], self.model, self.budget,
-                              schema_text)
+            argv = build_argv(self.claude_path, request.get("staging_dir"), self.model,
+                              self.budget, schema_text)
         try:
             proc = subprocess.run(argv, input=request["prompt"].encode("utf-8"),
                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE,
@@ -737,7 +743,13 @@ def _retained_name(rel, allow):
 def _prune_failed(root, keep=FAILED_KEEP_RUNS):
     """Keep the newest `keep` run folders of the failed store (run ids sort
     by time)."""
-    base = failed_dir(root)
+    prune_run_dirs(failed_dir(root), keep)
+
+
+def prune_run_dirs(base, keep=FAILED_KEEP_RUNS):
+    """Keep the newest `keep` <run_id> folders under base (run ids sort by
+    time; dot folders stay). The failed store and consolidate's preview
+    folders share it."""
     try:
         runs = sorted(name for name in os.listdir(base)
                       if os.path.isdir(os.path.join(base, name)) and not name.startswith("."))
@@ -1012,7 +1024,7 @@ def _write_if_changed(path, text):
     return False
 
 
-def generate_root_files(ctx, merged_drafts):
+def generate_root_files(ctx, merged_drafts, maintenance=True):
     """index.md, now.md, about-me.md and paused status in the worktree.
 
     Returns warning codes. A root file is never a reason to fail the run
@@ -1020,7 +1032,9 @@ def generate_root_files(ctx, merged_drafts):
     (`draft_unbalanced_fence:<name>:<domain>`), and a root file that cannot
     be reassembled safely (its own fences do not balance, its '## 내 메모'
     sits inside code, or the result would change 내 메모 or leave a fence
-    open) is left as it is (`root_file_skipped:<name>`)."""
+    open) is left as it is (`root_file_skipped:<name>`). maintenance=False
+    (consolidate) skips the handoff expiry and the paused status, which
+    rewrite pages outside the run's own changes."""
     root, wt, now = ctx["root"], ctx["wt"], ctx["now"]
     terms = verify.Terms(ctx["domains"].get("work_terms", []))
     warnings = []
@@ -1050,8 +1064,9 @@ def generate_root_files(ctx, merged_drafts):
             warnings.append("root_file_skipped:%s" % name)
             continue
         _write_if_changed(path, text)
-    verify.expire_handoff_state(wt, now)
-    verify.apply_paused(wt, now)
+    if maintenance:
+        verify.expire_handoff_state(wt, now)
+        verify.apply_paused(wt, now)
     return warnings
 
 
@@ -1178,35 +1193,37 @@ def absorb(root, environ=None, paths=None, now=None, runner=None, rules_path=Non
             remove_running_marker(root)
 
 
-def running_marker_path(root):
-    return os.path.join(common.state_dir(root), RUNNING_FILE)
+def running_marker_path(root, name=RUNNING_FILE):
+    return os.path.join(common.state_dir(root), name)
 
 
-def write_running_marker(root, now):
+def write_running_marker(root, now, name=RUNNING_FILE):
     """.state/absorb-running.json (pid, started_at) for `status`, which
-    never takes the lock itself (a scheduled tick would then skip)."""
+    never takes the lock itself (a scheduled tick would then skip).
+    consolidate keeps its own marker under another name."""
     data = collections.OrderedDict()
     data["pid"] = os.getpid()
     data["started_at"] = verify.iso_now(now)
     try:
         common.ensure_private_dir(common.state_dir(root))
-        common.atomic_write_text(running_marker_path(root), common.dumps_json(data), mode=0o600)
+        common.atomic_write_text(running_marker_path(root, name), common.dumps_json(data),
+                                 mode=0o600)
     except (common.WikiError, IOError, OSError):
         pass
 
 
-def remove_running_marker(root):
+def remove_running_marker(root, name=RUNNING_FILE):
     try:
-        os.unlink(running_marker_path(root))
+        os.unlink(running_marker_path(root, name))
     except OSError:
         pass
 
 
-def read_running_marker(root):
+def read_running_marker(root, name=RUNNING_FILE):
     """The marker of a live absorb, or None (missing, unreadable, or its
     process is gone)."""
     try:
-        data = common.load_json_file(running_marker_path(root))
+        data = common.load_json_file(running_marker_path(root, name))
     except common.WikiError:
         return None
     if not isinstance(data, dict) or not isinstance(data.get("pid"), int):
@@ -1295,36 +1312,38 @@ def _run(root, environ, paths, now, runner, rules_path, scheduled, fs_root, remo
     return report
 
 
-def _finish(ctx, report, prep, prep_json, run, previous, rules_path):
-    root, wt, now = ctx["root"], ctx["wt"], ctx["now"]
-    base = run["base_sha"]
-    domains_cfg = ctx["domains"]
-    batches = report["batches"]
-
-    message = "wiki: absorb %s 보류 (사람 편집과 겹침)" % run["run_id"]
-    merge_error = None
+def settle_and_merge(ctx, base, outcomes, defer_message, write_generated, generated_message,
+                     warnings):
+    """The end of a run that does not depend on source state (absorb and
+    consolidate share it). Pass 1 of defer_conflicts (pages main changed
+    while the LLM ran), then up to three rounds of: generated files back to
+    base, write_generated() (writes index.md, the root files and the log.md
+    line into the worktree, returns warning codes), one commit
+    (generated_message), pass 2 of defer_conflicts (it also covers the
+    generated files), until no new outcome is deferred. Then the whole-tree
+    secret scan (contract 4) and merge_into_main. outcomes need ok,
+    deferred and pages. Warning codes are added to warnings. Returns
+    (deferred paths, the WikiError that stopped the merge or None)."""
+    root, wt = ctx["root"], ctx["wt"]
     deferred = []
     try:
         # Pass 1: pages main changed while the LLM ran.
-        deferred += defer_conflicts(root, wt, base, batches, message)
-        interval = _hours_since(previous, now)
+        deferred += defer_conflicts(root, wt, base, outcomes, defer_message)
         for _attempt in range(3):
             # Generated files are rebuilt from base each time, so a batch
             # deferred in a later pass leaves no trace in them.
             restore_in_worktree(wt, base, [name for name in GENERATED_FILES
                                            if verify.blob_at(wt, base, name) is not None])
-            for code in generate_root_files(ctx, _merged_drafts(ctx, batches)):
-                if code not in report["warnings"]:
-                    report["warnings"].append(code)
-            broken = sum(b["broken_links"] for b in batches if b["ok"] and not b["deferred"])
-            _append_log(wt, _log_line(report, prep, interval, broken))
-            commit_worktree(wt, "wiki: absorb %s 색인·기록" % run["run_id"])
-            before = len([b for b in batches if b["deferred"]])
+            for code in write_generated():
+                if code not in warnings:
+                    warnings.append(code)
+            commit_worktree(wt, generated_message)
+            before = len([b for b in outcomes if b["deferred"]])
             # Pass 2: also covers index.md, log.md, now.md, about-me.md.
-            deferred += defer_conflicts(root, wt, base, batches, message)
-            if len([b for b in batches if b["deferred"]]) == before:
+            deferred += defer_conflicts(root, wt, base, outcomes, defer_message)
+            if len([b for b in outcomes if b["deferred"]]) == before:
                 break
-        hits = verify.scan_tree(wt, verify.scan_allow(wt, domains_cfg),
+        hits = verify.scan_tree(wt, verify.scan_allow(wt, ctx["domains"]),
                                 verify.known_source_ids(ctx["working_sources"]["sources"],
                                                         ctx["run_sources"]))
         blocking, existing = split_tree_hits(wt, base, hits)
@@ -1332,14 +1351,31 @@ def _finish(ctx, report, prep, prep_json, run, previous, rules_path):
             # Bytes main already holds (committed before a stricter scan):
             # refusing the merge would not remove them, only freeze the
             # wiki. Count only; the human fixes or allows them.
-            report["warnings"].append("secret_found_existing:%d" % len(existing))
+            warnings.append("secret_found_existing:%d" % len(existing))
         if blocking:
-            report["warnings"] += ["secret_found:%s" % hit.rsplit(":", 1)[0]
-                                   for hit in blocking[:20]]
+            warnings.extend("secret_found:%s" % hit.rsplit(":", 1)[0] for hit in blocking[:20])
             raise common.WikiError("secret_found", "secrets in %d file(s)" % len(blocking))
         merge_into_main(root, wt, base)
     except common.WikiError as exc:
-        merge_error = exc
+        return deferred, exc
+    return deferred, None
+
+
+def _finish(ctx, report, prep, prep_json, run, previous, rules_path):
+    root, wt, now = ctx["root"], ctx["wt"], ctx["now"]
+    base = run["base_sha"]
+    batches = report["batches"]
+    interval = _hours_since(previous, now)
+
+    def write_generated():
+        codes = generate_root_files(ctx, _merged_drafts(ctx, batches))
+        broken = sum(b["broken_links"] for b in batches if b["ok"] and not b["deferred"])
+        _append_log(wt, _log_line(report, prep, interval, broken))
+        return codes
+
+    deferred, merge_error = settle_and_merge(
+        ctx, base, batches, "wiki: absorb %s 보류 (사람 편집과 겹침)" % run["run_id"],
+        write_generated, "wiki: absorb %s 색인·기록" % run["run_id"], report["warnings"])
     report["deferred_files"] = sorted(set(deferred))
 
     merged = merge_error is None
@@ -1410,9 +1446,7 @@ def merge_into_main(root, wt, base):
 
 
 def _post_merge(ctx, report, prep_json, run, rules_path, merged):
-    root, wt, now = ctx["root"], ctx["wt"], ctx["now"]
-    # Caches and rules lines may name existing pages (scan_allow).
-    domains_cfg = verify.with_scan_allow(wt, ctx["domains"])
+    root, now = ctx["root"], ctx["now"]
     merged_batches = [b for b in report["batches"] if b["merged"]]
     try:
         for outcome in merged_batches:
@@ -1432,10 +1466,21 @@ def _post_merge(ctx, report, prep_json, run, rules_path, merged):
         private = ctx["private"].get(outcome["batch_id"]) or {}
         if private.get("drafts"):
             store_drafts(root, outcome["domain"], private["drafts"])
+    refresh_caches_and_rules(ctx, report, run["run_id"], rules_path,
+                             lambda: _pending_block(report, prep_json, run, now))
+
+
+def refresh_caches_and_rules(ctx, report, run_id, rules_path, pending):
+    """context-cache.json, alias-cache.json and the rules file from the
+    worktree, which holds main's HEAD by now (absorb and consolidate share
+    it). pending() gives the context cache's 'pending' block (None leaves
+    it out). Failures become warnings; rules_added/removed go into report."""
+    root, wt, now = ctx["root"], ctx["wt"], ctx["now"]
+    # Caches and rules lines may name existing pages (scan_allow).
+    domains_cfg = verify.with_scan_allow(wt, ctx["domains"])
     state = common.state_dir(root)
     try:
-        context = verify.build_context_cache(wt, domains_cfg, run["run_id"], now,
-                                             _pending_block(report, prep_json, run, now))
+        context = verify.build_context_cache(wt, domains_cfg, run_id, now, pending())
         if not verify.write_cache(os.path.join(state, "context-cache.json"), context, domains_cfg):
             report["warnings"].append("context_cache_secret")
         aliases = verify.build_alias_cache(wt, now, domains_cfg)
@@ -1446,7 +1491,7 @@ def _post_merge(ctx, report, prep_json, run, rules_path, merged):
     try:
         lines = verify.rules_lines(wt, domains_cfg, prepare.load_sources(root)["sources"])
         added, removed = verify.write_rules(rules_path, lines, os.path.join(state, BACKUPS_DIR),
-                                            run["run_id"])
+                                            run_id)
         record_rules_write(root, rules_path, lines)
         report["rules_added"], report["rules_removed"] = added, removed
     except (common.WikiError, IOError, OSError) as exc:

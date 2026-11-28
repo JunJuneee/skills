@@ -108,6 +108,8 @@ class BinCopyTest(ScheduleCase):
                 self.assertIn(name, rels)
         self.assertIn("templates/absorb_prompt.md", rels)
         self.assertIn("templates/SCHEMA.md", rels)
+        self.assertIn("consolidate.py", rels)
+        self.assertIn("templates/consolidate_prompt.md", rels)
         self.assertFalse([rel for rel in rels if "__pycache__" in rel or rel.endswith(".pyc")])
         sha = schedule.content_hash(source_files)
         self.assertEqual(schedule.content_hash(copy_files), sha)
@@ -410,9 +412,84 @@ class LedgerTest(ScheduleCase):
         self.assertEqual(schedule.read_ledger(self.root), {"runs": []})
 
 
+
+class ConsolidateDueTest(ScheduleCase):
+    """consolidate_due's cadence rules on their own (the hand-off through
+    run_absorb is in tests/test_consolidate.py)."""
+
+    def entry(self, epoch, status="ok", mode=None):
+        entry = schedule.make_entry({"status": status, "run_id": "r"}, epoch, epoch + 60, True)
+        if mode:
+            entry["mode"] = mode
+        return entry
+
+    def settings(self, **cfg):
+        return common.validate_settings({"consolidate": cfg} if cfg else {})
+
+    def absorb_ran(self, *parts, **kwargs):
+        schedule.record_run(self.root, self.entry(local_epoch(*parts), **kwargs))
+
+    def consolidate_ran(self, *parts, **kwargs):
+        schedule.record_run(self.root, self.entry(local_epoch(*parts), **kwargs),
+                            schedule.CONSOLIDATE_LEDGER)
+
+    def due(self, settings, *parts):
+        return schedule.consolidate_due(self.root, settings, local_epoch(*parts))
+
+    def test_seven_days_count_from_the_last_start(self):
+        self.consolidate_ran(2026, 11, 6, 9, 30)
+        for day in (7, 13):
+            self.absorb_ran(2026, 11, day, 9, 0)
+        self.assertEqual(self.due(self.settings(), 2026, 11, 13, 9, 29), (False, "too_soon"))
+        self.assertEqual(self.due(self.settings(), 2026, 11, 13, 9, 30), (True, "due"))
+        self.assertEqual(schedule.next_consolidate_epoch(self.root, self.settings()),
+                         local_epoch(2026, 11, 13, 9, 30))
+        # A failed normal run is the week's run too; a dry run never is.
+        self.consolidate_ran(2026, 11, 13, 9, 30, status="failed")
+        self.consolidate_ran(2026, 11, 14, 9, 30, mode="dry_run")
+        self.absorb_ran(2026, 11, 15, 9, 0)
+        self.assertEqual(self.due(self.settings(), 2026, 11, 15, 10, 0), (False, "too_soon"))
+        self.assertEqual(schedule.last_consolidate_epoch(self.root),
+                         local_epoch(2026, 11, 13, 9, 30))
+
+    def test_zero_days_still_once_a_day(self):
+        settings = self.settings(min_days_between_runs=0)
+        self.consolidate_ran(2026, 11, 6, 9, 30)
+        self.absorb_ran(2026, 11, 6, 9, 0)
+        self.assertEqual(self.due(settings, 2026, 11, 6, 23, 30), (False, "ran_today"))
+        self.absorb_ran(2026, 11, 7, 0, 0)
+        self.assertEqual(self.due(settings, 2026, 11, 7, 0, 30), (True, "due"))
+        self.assertEqual(schedule.next_consolidate_epoch(self.root, settings),
+                         local_epoch(2026, 11, 7, 0, 0))
+
+    def test_todays_last_absorb_entry_decides(self):
+        self.absorb_ran(2026, 11, 6, 9, 0)
+        self.assertEqual(self.due(self.settings(), 2026, 11, 6, 9, 30), (True, "first_run"))
+        self.absorb_ran(2026, 11, 6, 9, 15, status="failed")
+        self.assertEqual(self.due(self.settings(), 2026, 11, 6, 9, 30), (False, "absorb_not_ok"))
+        self.absorb_ran(2026, 11, 6, 9, 20, status="empty")
+        self.assertEqual(self.due(self.settings(), 2026, 11, 6, 9, 30), (True, "first_run"))
+        # Yesterday's ok absorb is not today's.
+        self.assertEqual(self.due(self.settings(), 2026, 11, 7, 9, 30),
+                         (False, "absorb_not_today"))
+
+    def test_corrupt_consolidate_ledger_is_a_first_run(self):
+        self.absorb_ran(2026, 11, 6, 9, 0)
+        path = schedule.ledger_path(self.root, schedule.CONSOLIDATE_LEDGER)
+        with open(path, "w") as handle:
+            handle.write("{not json")
+        self.assertEqual(self.due(self.settings(), 2026, 11, 6, 9, 30), (True, "first_run"))
+        self.assertIsNone(schedule.next_consolidate_epoch(self.root, self.settings()))
+        self.assertEqual(self.due(self.settings(enabled=False), 2026, 11, 6, 9, 30),
+                         (False, "disabled"))
+
+
 class RunAbsorbTest(ScheduleCase):
     def setUp(self):
         ScheduleCase.setUp(self)
+        # absorb's own rules here: a not-due tick would otherwise hand off
+        # to consolidate (the 7-day rule, tests/test_consolidate.py).
+        self.write_settings({"consolidate": {"enabled": False}})
         self.calls = []
         self.notified = []
         self.now = [local_epoch(2026, 11, 6, 9, 0)]
@@ -442,6 +519,27 @@ class RunAbsorbTest(ScheduleCase):
         kwargs.setdefault("notify_fn", self.fake_notify)
         return schedule.run_absorb(self.root, self.env, scheduled=scheduled, clock=self.clock,
                                    **kwargs)
+
+    def test_not_due_tick_hands_off_only_when_enabled(self):
+        self.run_absorb()
+        self.now[0] = local_epoch(2026, 11, 6, 9, 30)
+        handed = []
+
+        def fake_consolidate(root, environ, now=None, rules_path=None, mode="normal",
+                             domain=None, max_groups=None, scheduled=False):
+            handed.append((scheduled, mode, rules_path))
+            return {"command": "consolidate", "ok": True, "status": "empty", "mode": mode,
+                    "warnings": [], "summary_line": "위키 정리: 묶음 0"}
+        self.assertIsNone(self.run_absorb(consolidate_fn=fake_consolidate, rules_path="/r"))
+        self.assertEqual(handed, [])
+        self.write_settings({})
+        report = self.run_absorb(consolidate_fn=fake_consolidate, rules_path="/r")
+        self.assertEqual(report["command"], "consolidate")
+        self.assertEqual(handed, [(True, "normal", "/r")])
+        self.assertEqual(len(self.calls), 1)
+        self.assertEqual(len(schedule.read_ledger(self.root)["runs"]), 1)
+        self.assertEqual(len(schedule.read_ledger(self.root, schedule.CONSOLIDATE_LEDGER)["runs"]),
+                         1)
 
     def test_scheduled_run_records_then_notifies(self):
         report = self.run_absorb()

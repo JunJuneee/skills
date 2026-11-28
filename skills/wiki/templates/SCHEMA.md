@@ -1,6 +1,6 @@
 # 위키 규약 (SCHEMA)
 
-사람과 에이전트가 같은 페이지를 읽는다. frontmatter의 `summary`는 에이전트용 세 줄, 본문은 사람용이다. 페이지는 absorb만 쓴다. 세션 에이전트는 위키를 직접 고치지 않는다.
+사람과 에이전트가 같은 페이지를 읽는다. frontmatter의 `summary`는 에이전트용 세 줄, 본문은 사람용이다. 페이지는 absorb와 consolidate만 쓴다. 세션 에이전트는 위키를 직접 고치지 않는다.
 
 ## 폴더
 
@@ -10,11 +10,11 @@ work/      projects/ decisions/ people/ topics/ notes/ prefs/
 personal/  projects/ decisions/ topics/ notes/ prefs/
 inbox/work/  inbox/personal/     (git 제외, /wiki note가 씀. activity/ 아래는 /wiki collect가 씀)
 .state/                          (git 제외, 사본·캐시·실행 기록)
-.absorb-wt/                      (git 제외, absorb 전용 worktree)
+.absorb-wt/                      (git 제외, absorb·consolidate 전용 worktree)
 .bin/<version>/                  (git 제외, 자동 실행용 고정 스크립트)
 ```
 
-- `index.md`, `log.md`, 루트 `now.md`·`about-me.md`, `.state/*-cache.json`, 전역 선호 규칙 파일은 absorb의 verify(Python)가 만든다. LLM 단계는 묶음 도메인 폴더(`<domain>/**`)만 쓴다.
+- `index.md`, `log.md`, 루트 `now.md`·`about-me.md`, `.state/*-cache.json`, 전역 선호 규칙 파일은 absorb와 consolidate의 Python(verify)이 만든다. LLM 단계는 묶음 도메인 폴더(`<domain>/**`)만 쓴다.
 - 루트 `now.md`·`about-me.md`의 초안은 LLM이 `<domain>/_drafts/now.md`, `<domain>/_drafts/about-me.md` 조각으로 쓰고 verify가 조립한다. `_drafts/`는 커밋 전에 지운다.
 - 다른 도메인 폴더는 읽지도 쓰지도 않는다.
 
@@ -70,6 +70,10 @@ summary: |
 - 결정은 대체만 한다(`supersedes:`, `decided:`). 같은 실행에서 그 프로젝트의 `## 현재 상태`도 갱신한다.
 - handoff에서 온 그날의 상태는 `as_of`를 달고 14일 뒤 `## 현재 상태`에서 빠진다. Python이 src가 모두 14일 지난 handoff인 항목을 지우고, 섹션 전체가 그렇다면 섹션을 비운다. src가 없는 항목은 날짜를 알 수 없어 남는다. 다른 원본으로 상태를 새로 쓰면 `as_of`를 지운다.
 - 21일 동안 새 원본이 없는 프로젝트는 `status: paused`.
+
+## 정리 (consolidate)
+
+consolidate는 새 원본 없이 한 도메인의 페이지 몇 개를 다시 읽고, 겹친 페이지를 합치거나, 같은 사실이 어긋나면 src 날짜가 새로운 쪽을 따르거나(옛 src 줄도 남김), 같은 링크·같은 일을 가리키는 항목을 합쳐 비대한 섹션을 줄인다. 사실은 지우지 않는다. 묶음 페이지 전체의 src 줄(id, 날짜) 집합은 정리 전후가 같고, 본문의 `https://` 주소와 백틱으로 적은 경로·id는 하나도 빠지지 않으며, `## 내 메모` 위 본문은 정리 전의 절반(`settings.json`의 `consolidate.min_keep_ratio`) 아래로 줄지 않는다. 새 페이지를 만들지 않는다. 합쳐서 없어지는 페이지는 지우고(스텁을 남기지 않음) 그 title과 aliases는 남는 페이지의 `aliases`로 옮기며, 그 페이지로 가던 링크는 Python이 남는 페이지로 고친다. 남는 페이지의 `title`, `type`, `domain`, `updated`는 그대로 두고 `aliases`와 `repos`는 늘리기만 한다. decision 페이지와 작업 기록 노트는 LLM이 고치지 않고 참고로만 읽는다. 이 둘에서 바뀌는 것은 Python이 합친 페이지로 고치는 링크뿐이다. `## 내 메모`는 한 바이트도 바뀌지 않으며, 고칠 수 없는 곳(어느 `## 내 메모` 등)에서 링크된 페이지는 합치지 않는다.
 
 ## 링크
 

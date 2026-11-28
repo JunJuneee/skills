@@ -778,6 +778,15 @@ SETTINGS_DEFAULTS = collections.OrderedDict([
         ("interval_seconds", 1800),
         ("min_hours_between_runs", 20),
     ])),
+    # consolidate (scripts/consolidate.py). Optional keys bloat_main_bytes
+    # and bloat_section_items override its "bloated page" thresholds.
+    ("consolidate", collections.OrderedDict([
+        ("enabled", True),
+        ("min_days_between_runs", 7),
+        ("max_groups_per_run", 6),
+        ("max_pages_per_group", 8),
+        ("min_keep_ratio", 0.5),
+    ])),
 ])
 
 _PLACEHOLDER_RE = re.compile(r"<[^<>]+>")
@@ -921,7 +930,7 @@ def validate_settings(data):
         raise ConfigError("settings_invalid", "settings.json must be a JSON object")
     merged = json.loads(json.dumps(SETTINGS_DEFAULTS), object_pairs_hook=collections.OrderedDict)
     for key, value in data.items():
-        if key in ("notify", "schedule"):
+        if key in ("notify", "schedule", "consolidate"):
             if not isinstance(value, dict):
                 raise ConfigError("settings_invalid", "settings.json: %s must be an object" % key)
             merged[key].update(value)
@@ -952,7 +961,24 @@ def validate_settings(data):
                   integer=True)
     _check_number(merged["schedule"].get("min_hours_between_runs"),
                   "schedule.min_hours_between_runs", 0)
+    _validate_consolidate(merged["consolidate"])
     return merged
+
+
+def _validate_consolidate(cfg):
+    if not isinstance(cfg.get("enabled"), bool):
+        raise ConfigError("settings_invalid",
+                          "settings.json: consolidate.enabled must be true or false")
+    _check_number(cfg.get("min_days_between_runs"), "consolidate.min_days_between_runs", 0)
+    for key in ("max_groups_per_run", "max_pages_per_group"):
+        _check_number(cfg.get(key), "consolidate." + key, 1, integer=True)
+    _check_number(cfg.get("min_keep_ratio"), "consolidate.min_keep_ratio", 0)
+    if not 0 < cfg["min_keep_ratio"] <= 1:
+        raise ConfigError("settings_invalid",
+                          "settings.json: consolidate.min_keep_ratio must be > 0 and <= 1")
+    for key in ("bloat_main_bytes", "bloat_section_items"):
+        if key in cfg:
+            _check_number(cfg[key], "consolidate." + key, 1, integer=True)
 
 
 def load_settings(root):
@@ -1299,6 +1325,38 @@ PLAN_DEVIATIONS = (
     "secretsmanager:<Action> and Secrets Manager ARNs are not assignments",
     "failed_draft_retention:a failed batch's changed files kept redacted in "
     ".state/failed/<run_id>/<batch>/ (0700/0600, last 5 runs)",
+    "consolidate_merged_into:consolidate's merged_into is a list of {page, into} objects "
+    "(additionalProperties false; the plan's map also accepted); a loser not emptied, a type "
+    "mismatch, a chain or a page outside the group fails the group (merge_invalid)",
+    "consolidate_exclusions:consolidate also leaves out untracked pages, pages verify would "
+    "fail unchanged, pages whose 내 메모 a fence hides and personal pages whose path hits "
+    "work_terms; merge_blocked_locked_link also covers frontmatter, left-out pages (worktree "
+    "and main), root 내 메모, the other domain's pages and notes outside the domain folders "
+    "(daily, inbox, untracked) and an ambiguous bare [[name]]; refusals are settled before "
+    "any edit, re-checked after each refused loser comes back",
+    "consolidate_python_edits:Python rewrites links in decisions and worklog notes too, root "
+    "files by path form only; merged project pages union repos (identity check: repos only "
+    "grow); a loser's names go to the survivor only and the stored mention group leaves out "
+    "names another page holds; src ids repaired to the group's own; the domain-wide "
+    "withdrawn-src scan is off",
+    "consolidate_maintenance:the LLM keeps updated; root assembly skips handoff expiry and "
+    "paused; signal 4 fills with one-page groups; a normal run with groups always writes the "
+    "log.md line and the index commit",
+    "consolidate_state_files:.state/last-consolidate (normal runs), consolidate-running.json, "
+    "last-consolidate-report.json (0600; dry runs and plans write their own preview and plan "
+    "files); previews kept for the last 5 runs; stored root fragments rewritten before the "
+    "merge (drafts_store_failed stops it, put back when it does not happen); failed copies "
+    "under consolidate-<n>; conflict facts and notes truncated and redacted; the cache's "
+    "pending block carried over; reports carry command=consolidate",
+    "consolidate_schedule:no second consolidate on the day of the last one even with "
+    "min_days_between_runs 0; no absorb entry today or a held one waits; dry runs recorded "
+    "with their mode, never counted, no Slack; --plan unrecorded; --max-groups >= 1; "
+    "consolidate.enabled gates scheduled runs only; status' notify warning reads the last "
+    "normal entry",
+    "consolidate_user_rules:with foreign user rules personal pages are no consolidate "
+    "candidates (they took the run's group slots only to refuse); user_rules_unisolated:<n>, "
+    "a failed run when nothing else is left; the prompt's page list carries counts, never "
+    "section headings",
 )
 
 

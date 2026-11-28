@@ -1,6 +1,6 @@
 ---
 name: wiki
-description: 개인 맥락 위키를 다룬다. init으로 work·personal 폴더와 규약을 만들고, absorb로 내가 쓴 프롬프트·memory·handoff·inbox 노트를 격리된 하위 프로세스에서 페이지로 반영하며, collect로 GitHub·Linear·Discord·Traycer 활동(한 일·할 일·확인할 것·논의·자료 링크의 근거)을 inbox 노트로 모으고, note로 도메인을 정해 메모를 넣고, query로 찾는다. status로 상태를 보고, schedule로 하루 한 번 자동 실행(launchd)과 Slack 한 줄 알림을 켠다. "/wiki init", "/wiki absorb", "/wiki collect", "/wiki note", "/wiki query", "/wiki status", "/wiki schedule", "위키 초기화", "위키에 반영", "위키에 메모", "위키에서 찾아줘", "위키 상태", "위키에 활동 수집", "위키 자동 실행 설치" 같은 요청에 사용.
+description: 개인 맥락 위키를 다룬다. init으로 work·personal 폴더와 규약을 만들고, absorb로 내가 쓴 프롬프트·memory·handoff·inbox 노트를 격리된 하위 프로세스에서 페이지로 반영하며, collect로 GitHub·Linear·Discord·Traycer 활동(한 일·할 일·확인할 것·논의·자료 링크의 근거)을 inbox 노트로 모으고, consolidate로 새 원본 없이 쌓인 페이지를 다시 읽어 겹친 페이지를 합치고 비대한 섹션을 줄이며(src·링크는 잃지 않음), note로 도메인을 정해 메모를 넣고, query로 찾는다. status로 상태를 보고, schedule로 하루 한 번 자동 실행(launchd, 정리는 그 위에서 7일에 한 번)과 Slack 한 줄 알림을 켠다. "/wiki init", "/wiki absorb", "/wiki collect", "/wiki consolidate", "/wiki note", "/wiki query", "/wiki status", "/wiki schedule", "위키 초기화", "위키에 반영", "위키 정리", "위키에 메모", "위키에서 찾아줘", "위키 상태", "위키에 활동 수집", "위키 자동 실행 설치" 같은 요청에 사용.
 ---
 
 # Wiki
@@ -21,7 +21,7 @@ python3 "$SKILL_DIR/scripts/wiki.py" <명령> [옵션]
 
 ## 지켜야 할 것
 
-1. 이 세션의 도구(Edit, Write 등)로 위키 페이지를 고치지 않는다. 위키 쓰기는 `absorb` 하나뿐이고, 그 안의 LLM 단계도 도구를 제한한 별도 하위 프로세스다.
+1. 이 세션의 도구(Edit, Write 등)로 위키 페이지를 고치지 않는다. 위키 쓰기는 `absorb`와 `consolidate`뿐이고, 둘 다 그 안의 LLM 단계는 도구를 제한한 별도 하위 프로세스다.
 2. 맥락을 남기고 싶으면 auto-memory나 handoff에 남긴다. 다음 absorb가 읽는다.
 3. `note`는 사람용이다. 도메인(`work` 또는 `personal`)을 사용자에게 받지 못했으면 넣지 않는다. 짐작해서 고르지 않는다.
 4. 도메인을 판정할 수 없는 곳(홈 폴더, git 없는 폴더, Traycer epic 폴더)에서 얻은 내용은 어느 도메인에도 넣지 않는다. 프롬프트만 예외로 세션과 LLM으로 판정한다(`dev:prompt_classify`).
@@ -34,9 +34,10 @@ python3 "$SKILL_DIR/scripts/wiki.py" <명령> [옵션]
 | `init` | 폴더, `SCHEMA.md`, `domains.json`, `settings.json`, `now.md`, `about-me.md`, `.gitignore`, 로컬 git(원격 없음, `main`)을 만듦 |
 | `absorb [--scheduled] [--rules-path FILE] [--no-notify] [--no-collect]` | 먼저 `collect`를 돌린 뒤(설정했을 때만) 바뀐 원본을 모아 격리된 `claude -p`로 페이지를 갱신하고 검증 후 `main`에 병합. 끝나면 장부에 기록하고 Slack 한 줄을 보냄 |
 | `collect [--dry-run] [--since-days N] [--from 날짜 --to 날짜] [--source 이름,…]` | GitHub·Linear·Discord·Traycer에서 마지막 수집 이후의 활동을 가져와 `inbox/<domain>/activity/`에 노트로 씀. 다음 absorb가 반영 |
+| `consolidate [--plan\|--dry-run] [--domain work\|personal] [--max-groups N] [--rules-path FILE] [--no-notify] [--verbose]` | 새 원본 없이 페이지 몇 개씩을 격리된 `claude -p`로 다시 읽어 겹친 페이지를 합치고, 어긋난 사실을 맞추고, 비대한 섹션을 줄인 뒤 검증해 `main`에 병합(묶음마다 커밋 하나). `--plan`은 후보 수만, `--dry-run`은 병합 없이 diff만. 자동 실행에서는 absorb 차례가 아닌 tick에 7일에 한 번 |
 | `note --domain work\|personal <글>` | `inbox/<domain>/`에 메모를 넣음. 다음 absorb가 반영 |
 | `query [--domain work\|personal] [--limit N] <글>` | 현재 레포 도메인(또는 `--domain`)의 페이지에서 찾음 |
-| `status` | 지금 도는 absorb(있으면 시작 시각), 마지막 실행, 장부의 마지막 기록(상태와 사유 코드), 마지막 수집, 다음 자동 실행 시각(설치했을 때만), 반영 대기 수(숫자만), 경고(플레이스홀더, 고정 스크립트 버전 차이, 알림 실패, 위키 폴더 권한, 수집 실패, 자동 실행이 launchd에서 실패 중) |
+| `status` | 지금 도는 absorb·consolidate(있으면 시작 시각), 마지막 실행, 장부의 마지막 기록(상태와 사유 코드), 마지막 정리(시각, 상태, 사유 코드), 마지막 수집, 다음 자동 실행 시각(설치했을 때만), 다음 정리, 반영 대기 수(숫자만), 경고(플레이스홀더, 고정 스크립트 버전 차이, 알림 실패, 위키 폴더 권한, 수집 실패, 자동 실행이 launchd에서 실패 중) |
 | `schedule install\|uninstall\|print [--no-load] [--claude PATH] [--rules-path FILE]` | launchd 작업을 설치·제거하거나 설치될 plist를 보여 줌(`--install`, `--uninstall`, `--print`도 됨) |
 
 ### init
@@ -143,6 +144,46 @@ python3 "$SKILL_DIR/scripts/wiki.py" collect              # 노트를 쓰고 커
 - 활동 노트가 페이지에서 어디로 가는지는 `templates/absorb_prompt.md`의 "활동 기록을 페이지로 옮기는 규칙"과 `SCHEMA.md`에 있다: 프로젝트 페이지의 `## 할 일`, `## 확인할 것`, `## 한 일`, `## 논의`(누구와 어디서 무엇을 이야기했고 어떻게 정리됐는지), `## 자료`(PR·이슈·스레드 링크와 Traycer 작업 id·산출물·md 경로), 월별 작업 기록 노트 `notes/worklog-YYYY-MM.md`, 루트 `now.md`의 도메인별 할 일·확인할 것·최근 한 일.
 - 이미 있는 위키는 `SCHEMA.md`와 `.gitignore`가 init 때의 사본이므로 `templates/SCHEMA.md`와 `templates/wiki-gitignore.txt`에 맞춰 직접 고쳐 커밋한다(absorb의 LLM은 위키에 커밋된 `SCHEMA.md`를 읽는다).
 
+### consolidate (정리, Dreaming)
+
+새 원본 없이 이미 쌓인 한 도메인의 페이지를 몇 개씩 묶어 다시 읽고 정리한다. 겹친 페이지를 하나로 합치고, 같은 사실이 어긋나면 src 날짜가 새로운 쪽을 따르며(옛 쪽 src 줄도 남김), 판단이 서지 않으면 둘 다 두고 보고서에만 적는다. 같은 링크·같은 일을 가리키는 항목을 합쳐 비대한 섹션을 줄인다. 사실은 지우지 않는다(합치기·옮기기·줄이기만. 오래된 것을 빼는 일은 handoff 14일 만료, `## 한 일` 20개 상한, 철회 같은 기존 규칙이 한다).
+
+```bash
+python3 "$SKILL_DIR/scripts/wiki.py" consolidate --plan       # 후보 묶음과 숫자만. 잠금·LLM 없음
+python3 "$SKILL_DIR/scripts/wiki.py" consolidate --dry-run    # LLM과 검사까지 하고 병합하지 않음
+python3 "$SKILL_DIR/scripts/wiki.py" consolidate [--domain work|personal] [--max-groups N]
+```
+
+묶음 하나가 absorb 묶음처럼 최대 30분 걸리고 한 실행이 최대 6묶음이므로, `--plan` 말고는 absorb처럼 백그라운드로 돌리고 `status`로 결과를 본다. 도는 동안 `.state/consolidate-running.json`에 pid와 시작 시각을 쓰고 `status`가 `consolidate: 실행 중`을 보여 준다.
+
+1. 잠금과 전제: absorb와 같은 잠금(`.state/absorb.lock`)을 잡으므로 둘이 같이 돌지 않는다(겹치면 `lock_busy`). `domains.json` 확인(`owners_unset`, `work_terms_unset`)은 absorb와 같다. 사용자 rules 폴더에 다른 `.md`가 있으면(`user_rules_present:<개수>`) personal 페이지는 후보로 고르지 않는다. 골라도 absorb처럼 `user_rules_unisolated`로 돌지 않으면서 실행의 묶음 자리만 차지하기 때문이다. 빠진 묶음 수는 `user_rules_unisolated:<개수>` 경고로 남고, 그것 말고 돌 묶음이 없으면 실행이 `user_rules_unisolated`로 실패한다. `--plan`도 같게 센다.
+2. 후보 묶음(Python, LLM 없음). 도메인마다 아래 순서로 묶는다. 묶음 하나는 `max_pages_per_group`(8) 페이지 이하, 한 실행은 `max_groups_per_run`(6) 묶음 이하다.
+   - 같은 대상 의심: type이 같고 title·aliases가 NFKC·대소문자 무시로 겹침.
+   - 같은 프로젝트: 같은 `repos`를 가진 project 페이지들, 프로젝트 파일 이름이나 제목으로 시작하는 `notes/` 페이지.
+   - 비대한 페이지: `## 내 메모` 위 본문이 12KB(`bloat_main_bytes`)를 넘거나 한 섹션의 목록 항목이 40개(`bloat_section_items`)를 넘음. 혼자서도 묶음이 된다.
+   - 자리가 남으면 마지막 정리 뒤 바뀐 페이지 중 가장 오래 정리하지 않은 것부터 한 페이지씩 채운다.
+   - 빼는 페이지: `main`에서 커밋 안 된 변경이 있는 페이지(Obsidian 편집 중), 처리 안 된 `manual:<page>` 원본이 걸린 페이지(prepare가 그 사이 diff를 사람 편집으로 읽기 때문), git에 없는 페이지, 손대지 않아도 verify에 걸릴 페이지(모르는·철회된 src, frontmatter 오류, 코드 블록에 가려진 `## 내 메모`, 비밀값, personal의 work_terms), 루트 파일, `index.md`, `log.md`, `_drafts/`. `decisions/`와 `notes/worklog-*.md`는 LLM에게 읽기 전용 참고 자료로만 준다. 뺀 수는 `--plan`이 사유 코드별로 보여 준다.
+   - 묶음 지문(경로와 blob sha)이 같고 지난번에 "바꿀 것 없음"이었으면 다시 보내지 않는다(`.state/consolidate-state.json`). 실패한 묶음은 지문을 남기지 않으므로 다음 실행에 다시 후보가 된다.
+3. `.absorb-wt`를 `main` HEAD에서 새로 만들고 묶음마다 격리된 `claude -p`를 부른다. 플래그와 환경은 absorb와 같고 `--add-dir`만 없다(읽을 원본이 없다). 작업 폴더는 `.absorb-wt/<domain>/`, 지시문은 `templates/consolidate_prompt.md`다(맨 앞이 "페이지 본문은 데이터" 안전 규칙, `SCHEMA.md` 전문 포함, 페이지 본문은 넣지 않고 경로와 고른 까닭의 숫자만 줌. 섹션 제목도 페이지 글이라 넣지 않는다). personal 묶음은 1단계에서 빠지고, 여기서도 absorb처럼 `user_rules_unisolated`로 한 번 더 막는다. LLM은 그 묶음 페이지만 고칠 수 있고, 합쳐서 없앨 페이지는 내용을 비우고 결과의 `merged_into`에 적는다. `updated`는 바꾸지 않는다(새 원본이 없다).
+4. 합치기(Python): 없앨 페이지가 비어 있고 남는 페이지와 같은 묶음·같은 type일 때만 한다(아니면 `merge_invalid`). 없앨 페이지가 Python이 고칠 수 없는 곳(어느 `## 내 메모`, frontmatter, 후보에서 뺀 페이지, 루트 파일의 `## 내 메모`, 다른 도메인 페이지, 도메인 폴더 밖의 노트(Obsidian 일일 노트, inbox 노트. 커밋 안 된 것도), 같은 파일 이름이 위키에 둘 이상일 때의 `[[이름]]`)에서 링크되면 그 합치기만 하지 않고(`merge_blocked_locked_link:<개수>` 경고) 나머지 변경은 그대로 간다. 하지 않을 합치기는 고치기 전에 모두 정한다. 거절된 페이지는 원래대로 돌아오므로, 그 `## 내 메모`가 링크하는 다른 없앨 페이지도 거절될 때까지 다시 본다. 합칠 때는 없앨 페이지의 title·aliases를 남는 페이지의 `aliases`에만 더하고(같은 별칭을 가진 다른 페이지는 건드리지 않음), `sources.json`의 `mention_groups`에는 그중 다른 페이지가 가진 이름을 뺀 묶음을 적고, project면 `repos`도 합치고, 도메인 전체(`decisions/`와 작업 기록 노트 포함), `.state/drafts/` 조각, 루트 파일(경로 링크만)에서 그 페이지로 가던 링크를 남는 페이지로 고친 뒤(`## 내 메모`, 코드, frontmatter는 건너뜀) 파일을 지운다. 스텁을 남기지 않는다.
+5. 검사: absorb의 페이지 검사(frontmatter, `## 내 메모` 바이트, 알려진 같은 도메인 src, 다른 도메인 링크, 비밀값, personal의 work_terms)에 더해 아래를 본다. 하나라도 걸리면 그 묶음만 worktree에서 되돌리고, 바꾼 파일을 비밀값을 가린 사본으로 `.state/failed/<run_id>/consolidate-<n>/`에 남긴다.
+   - `outside_group`: LLM이 묶음 밖 페이지나 decision·작업 기록 노트를 고치거나 새 파일을 만듦.
+   - `src_lost`, `src_added`: 묶음 페이지 전체(지운 페이지 포함)의 `<!-- src: id @날짜 -->` 쌍 집합이 전후 같아야 한다. LLM이 옮겨 적다 틀린 id는 absorb처럼 묶음 자신의 id로 고친다(`src_id_repaired:<개수>` 경고).
+   - `link_lost`: 본문의 `https://` 주소와 백틱으로 적은 경로·id가 하나도 빠지지 않아야 한다.
+   - `shrunk_too_much`: 묶음 본문(`## 내 메모` 위) 바이트가 이전의 `min_keep_ratio`(0.5) 이상이어야 한다.
+   - `page_identity_changed`: 남는 페이지의 type·domain·title은 그대로, aliases·repos는 늘기만 해야 한다.
+   - `promotion_regressed`: 정리 뒤 "원본 3개 이상인데 페이지가 없는 이름"이 늘면 실패한다(지운 페이지가 다음 absorb에서 승격으로 다시 생기는 것을 막음).
+   - `merge_invalid`, 그리고 absorb와 같은 `llm_error`, `llm_timeout`, `llm_output_invalid`, `budget_exceeded`, `page_unreadable`.
+6. 병합: 묶음마다 커밋 하나(`wiki: consolidate <run_id> 묶음 <n> (<domain>)`). 그 뒤는 absorb의 병합과 같다. 사람이 그사이 고친 파일을 건드린 묶음은 통째로 미루고, 링크를 고친 `.state/drafts/` 조각을 병합 전에 저장하고, `index.md`와 루트 `now.md`·`about-me.md`를 그 조각으로 다시 조립하고(handoff 만료와 `paused`는 absorb만 한다), `log.md`에 한 줄을 쓰고, 위키 전체 비밀값 검사를 하고, `main` HEAD가 움직였으면 `main_moved`로 아무것도 병합하지 않고, `merge --ff-only`로 들어간다. 조각을 병합 전에 쓰는 것은 absorb가 매일 이 조각으로 루트 파일을 다시 조립하기 때문이다(지운 페이지로 가는 링크가 되살아나지 않게). 조각 저장이 실패하면 `drafts_store_failed`로 병합하지 않고, 병합이 안 되면 조각을 원래대로 되돌린다. 병합 뒤 캐시(`pending`은 absorb 것을 그대로 둠), 전역 선호 규칙 파일, 묶음 지문을 갱신한다.
+7. 되돌리기: 결과가 마음에 들지 않으면 그 묶음 커밋만 `git revert`한다. 되돌린 변경도 커밋이라 다음 absorb가 사람 편집으로 받지 않는다.
+
+- 모드: `--plan`은 후보와 숫자만 보여 주고 잠금·LLM·worktree를 쓰지 않으며 장부에 남지 않는다. `--dry-run`은 LLM과 검사까지 하고 병합하지 않는다. 가린 diff는 `.state/consolidate/<run_id>/preview.diff`(0600, 최근 5회만 남김)에만 쓰고, 장부에는 남지만 7일 판정에 넣지 않으며 Slack도 보내지 않는다. 처음 써 볼 때는 `--dry-run`의 diff를 한 번 읽어 본다. `--max-groups`는 1 이상이다.
+- 세션에 보이는 것(글, `--json`)과 Slack은 상태, 사유 코드, 숫자뿐이다(예: `위키 정리: 묶음 3 · 합침 1 · 고침 4 · 실패 0 · 어긋남 2`). 페이지 경로, 어긋남 목록(어느 페이지가 무엇에서 어긋나는지), 실패 세부는 보고서 파일(0600)에만 쓴다. normal 실행은 `.state/last-consolidate-report.json`, `--dry-run`은 `.state/last-consolidate-preview.json`, `--plan`은 `.state/last-consolidate-plan.json`이다. 미리보기가 지난 실제 실행의 어긋남 목록을 덮어쓰지 않게 따로 둔다. `--verbose`는 그것을 보여 주므로 공유 세션이나 공개 레포 세션에서 쓰지 않는다. 마지막 normal 실행의 결과는 `.state/last-consolidate`에 남고 `status`의 `마지막 정리` 줄이 보여 준다(`--plan`과 `--dry-run`은 정리한 것이 없어 남기지 않는다).
+- 상태: `ok`, `empty`(정리할 묶음 없음), `held`(`budget_exceeded`), `failed`(준비 실패, 모든 묶음 실패, 병합 실패. 종료 코드 1).
+- 자동 실행: 새 launchd 작업을 만들지 않는다. 기존 작업이 absorb 차례가 아닌 tick에서 consolidate 차례인지 본다(아래 schedule의 7일 규칙). 수동 실행도(`--dry-run`과 `--plan` 말고) `.state/consolidate-ledger.json`에 들어가 7일에 센다. `settings.json`의 `consolidate.enabled`를 `false`로 두면 자동 실행만 꺼지고 직접 부르는 것은 된다.
+- `settings.json`의 `max_budget_usd`는 묶음 하나당 상한이므로 한 실행의 최대 비용은 묶음 수(기본 6)배다. 숫자(`min_days_between_runs` 7, `max_groups_per_run` 6, `max_pages_per_group` 8, `min_keep_ratio` 0.5, `bloat_main_bytes` 12288, `bloat_section_items` 40)는 `settings.json`의 `consolidate` 아래에서 바꾼다. `--plan` 결과를 보고 맞춘다.
+- 이미 있는 위키의 `SCHEMA.md`는 init 때의 사본이므로 `templates/SCHEMA.md`에 맞춰(3번째 줄, `.absorb-wt` 설명, "정리 (consolidate)" 단락) 직접 고쳐 커밋한다. consolidate의 LLM도 위키에 커밋된 `SCHEMA.md`를 읽는다.
+
 ### note
 
 ```bash
@@ -191,11 +232,18 @@ python3 "$SKILL_DIR/scripts/wiki.py" schedule uninstall
 
 - 실패나 한도 보류도 그날의 실행으로 센다. 실패하면 30분마다 다시 도는 대신 다음 날 다시 돈다.
 - 수동 `absorb`도 장부에 들어가므로, 그날 수동으로 돌렸으면 자동 실행은 건너뛴다.
+
+7일 규칙(consolidate): 같은 작업의 tick에서 absorb 차례가 아니면 consolidate 차례인지 본다. 한 tick에 둘 다 돌지 않고, plist의 `ProgramArguments`(`absorb --scheduled`)는 그대로다. 고정 스크립트에 `consolidate.py`가 들어가야 하므로 이 기능이 생긴 뒤에는 `schedule install`을 한 번 다시 돌린다(`status`의 `bin_stale`. 고정 스크립트에 `consolidate.py`가 없으면 `다음 정리` 줄도 다시 설치하라고 알려 준다). 다시 설치하기 전에 `consolidate --plan`과 `--dry-run`을 한 번 보고 수동 실행을 한 번 한다. 설치하면 `RunAtLoad`로 그날 첫 정리가 바로 돌 수 있다(묶음 최대 6개, 비용은 `max_budget_usd`의 묶음 수배).
+
+- 차례: `consolidate.enabled`가 참이고, `.state/consolidate-ledger.json`의 마지막 정리 시작 뒤 `consolidate.min_days_between_runs`(7)일이 지났고 그날이 아니며(기록이 없으면 차례), absorb 장부에 오늘(현지 날짜) 기록이 있고 그 마지막이 `ok`나 `empty`일 때. 오늘 absorb가 실패나 한도 보류로 끝났거나 아직 돌지 않았으면 다음 tick이나 다음 날로 미룬다. 그래서 늘 그날 absorb가 반영한 최신 페이지를 정리한다.
+- 실패도 그 주의 실행으로 센다(30분마다 다시 돌며 돈을 쓰지 않게). `--dry-run`은 장부에 `mode`와 함께 남지만 세지 않는다.
+- 장부를 absorb와 따로 두는 것은 absorb의 20시간 규칙이 장부의 마지막 기록을 읽기 때문이다. consolidate 기록은 absorb의 차례를 바꾸지 않는다.
+- 잠금이 잡혀 있으면 조용히 건너뛴다. 그 tick의 출력(`launchd.log` 한 줄)과 Slack 한 줄은 정리 결과다.
 - 때가 아니거나, 다른 absorb가 잠금을 잡고 있거나, 위키가 없으면 아무것도 출력하지 않고 종료 코드 0으로 끝난다.
 
 ### 알림 (Slack 한 줄)
 
-absorb가 끝나면 고정 문구와 숫자만 한 줄로 보낸다. 페이지 제목, 원본 내용, 경고 문구는 넣지 않는다.
+absorb와 consolidate가 끝나면 고정 문구와 숫자만 한 줄로 보낸다. 페이지 제목, 원본 내용, 경고 문구, 어긋남 내용은 넣지 않는다. consolidate의 전송 결과는 `.state/consolidate-ledger.json`의 그 실행 기록에 남는다.
 
 | 상태 | 예 |
 |---|---|
@@ -203,6 +251,10 @@ absorb가 끝나면 고정 문구와 숫자만 한 줄로 보낸다. 페이지 �
 | 0건 | `위키: 반영 0 · 격리 1` |
 | 실패 | `위키: 실패 (claude_flags_missing)` (사유 코드만, 형식이 맞지 않으면 `unknown`) |
 | 한도 보류 | `위키: 한도 보류 · 반영 3 · 새 페이지 0 · 격리 0 · 전역 선호 +0/−0 · 실패 1` |
+| 정리 성공 | `위키 정리: 묶음 3 · 합침 1 · 고침 4 · 실패 0 · 어긋남 2` (보류 묶음이 있으면 `· 보류 n`) |
+| 정리 0건 | `위키 정리: 묶음 0` |
+| 정리 실패 | `위키 정리: 실패 (main_moved)` |
+| 정리 한도 보류 | `위키 정리: 한도 보류 · 묶음 2 · 합침 0 · 고침 1 · 실패 1 · 어긋남 0` |
 
 - 보내는 방법: 스크립트 안의 표준 라이브러리 `chat.postMessage` 전송기. 토큰은 보낼 때마다 `token_cmd`(셸 문자열이 아니라 argv 리스트, 예: `["doppler", "secrets", "get", "SLACK_BOT_TOKEN", "--plain", "--project", "<project>", "--config", "<config>"]`)를 셸 없이 실행해 받고, `xoxb-`로 시작하지 않으면 보내지 않는다(`token_invalid`). 토큰은 어디에도 기록하지 않는다.
 - 설정: `<위키>/notify.json`이 있으면 그것, 없으면 `settings.json`의 `notify`. 키는 둘 다 `slack_channel`(채널 ID, 예: `C0123456789`)과 `token_cmd`. `notify.json`은 위키 `.gitignore`에 들어 있다. 둘 중 하나라도 비어 있으면 보내지 않고 장부에만 남긴다(`log_only`, `not_configured`).
@@ -211,7 +263,7 @@ absorb가 끝나면 고정 문구와 숫자만 한 줄로 보낸다. 페이지 �
 ## 설정 파일
 
 - `domains.json`: `owners`, `work_terms`, `overrides`, `redact_allow`, `obsidian_plugins_allow`. 키 이름이 `_`로 시작하면 주석으로 본다. 그 밖의 키는 오류.
-- `settings.json`: 도메인과 무관한 설정(`model`, `max_budget_usd`, `claude_path`, `batch_max_sources`, `notify.slack_channel`, `notify.token_cmd`, `schedule.*`). 비밀값을 넣지 않는다. Slack 토큰은 보낼 때 `notify.token_cmd`(셸 문자열이 아니라 argv 리스트)로 받아온다.
+- `settings.json`: 도메인과 무관한 설정(`model`, `max_budget_usd`, `claude_path`, `batch_max_sources`, `notify.slack_channel`, `notify.token_cmd`, `schedule.*`, `consolidate.*`). 비밀값을 넣지 않는다. Slack 토큰은 보낼 때 `notify.token_cmd`(셸 문자열이 아니라 argv 리스트)로 받아온다.
 - `notify.json`(선택, git에 들어가지 않음): `slack_channel`, `token_cmd`. 있으면 `settings.json`의 `notify`보다 먼저 쓴다.
 - 둘 다 JSON이다. YAML은 쓰지 않는다.
 
@@ -294,6 +346,13 @@ absorb가 끝나면 고정 문구와 숫자만 한 줄로 보낸다. 페이지 �
 - `collect` 명령을 추가했다(계획에 없던 원본: GitHub, Linear, Discord, 그리고 Traycer 대화의 답과 산출물 경로. 계획은 Traycer에서 내 프롬프트만 읽었다). 계획의 원본은 모두 이 컴퓨터의 파일이라 병합된 PR, 이슈 상태, 채팅에서 정한 것이 페이지에 쌓이지 않았다. 새 원본 종류를 만들지 않고 inbox 노트로 넣어 도메인 고정, 비밀값 가림, 격리된 LLM, verify를 그대로 거치게 했다. 계정과 id는 공개 레포에 두지 않고 위키의 `collect.json`(git 제외)에서 읽는다. `dev:activity_collect`
 - 프로젝트 페이지에 `## 할 일`, `## 확인할 것`, `## 한 일`, `## 논의`, `## 자료`를, notes에 월별 작업 기록(`worklog-YYYY-MM`)을, `now.md` 초안에 같은 세 묶음을 더했다. 계획의 프로젝트 페이지는 "이번 주 무엇을 왜"와 "현재 상태"뿐이라 끝낸 일과 남은 일이 기록으로 남지 않았다. 세 섹션은 `## 현재 상태`처럼 항목마다 src 줄을 둔다. `dev:work_sections`
 - 자동 실행이 launchd에서 실패하는 것을 `status`가 알려 준다(`launchd_failing:<코드>`, `root_tcc_protected`). 실제로 위키를 `~/Desktop` 아래로 옮긴 뒤 launchd가 종료 코드 78로 열흘 넘게 한 번도 돌지 못했는데, 스크립트가 시작도 못 해 장부·Slack·`status` 어디에도 드러나지 않았다(2026-11-14~11-25, 실행 440여 회 모두 78. 같은 폴더를 여는 시험 작업도 `Operation not permitted`). `dev:launchd_health`
+- consolidate 계획(위키 consolidate 설계)의 `merged_into`는 `{없어질 페이지: 남는 페이지}` 맵이었지만 `{page, into}` 객체 리스트로 받는다. absorb 결과 스키마와 같은 `additionalProperties: false` 모양이라서다(맵은 키를 검사하지 못한다). 맵 모양이 와도 받아 준다. 없앨 페이지를 비우지 않았거나, type이 다르거나, 연쇄로 합치거나(남는 페이지가 다른 곳으로 합쳐짐), 묶음 밖 페이지를 고르면 새 사유 코드 `merge_invalid`로 그 묶음이 실패한다. `dev:consolidate_merged_into`
+- consolidate 후보에서 계획의 제외(커밋 안 된 편집, 처리 안 된 `manual:` 원본)에 더해 git에 없는 페이지, 손대지 않아도 verify에 걸릴 페이지, `## 내 메모`가 코드 블록에 가려진 페이지, 경로가 work_terms에 걸리는 personal 페이지를 뺀다. 매번 같은 사유로 실패해 LLM 비용만 쓰기 때문이다. `merge_blocked_locked_link`도 `## 내 메모`가 링크할 때 말고 frontmatter, 후보에서 뺀 페이지(worktree와 `main` 작업 트리 양쪽), 루트 파일의 `## 내 메모`(양쪽), 다른 도메인 페이지와 도메인 폴더 밖 노트(양쪽. 일일 노트, inbox 노트, 커밋 안 된 노트 포함. 다른 도메인 링크는 `## 내 메모` 안에서는 verify가 허용해 커밋된다), 같은 파일 이름이 위키에 둘 이상일 때의 `[[이름]]`이 링크할 때도 건다. 모두 Python이 고칠 수 없어서 합치면 링크가 깨지는 곳이다. `index.md`, `log.md`, 루트 파일의 `## 내 메모` 위는 Python이 다시 만들거나 고치므로 보지 않는다. 거절할 합치기는 별칭·링크를 고치기 전에 모두 정한다. 거절된 페이지는 원래 글(그 `## 내 메모`까지)로 돌아오므로, 그 페이지가 비어 있을 때 통과한 다른 합치기를 거절이 더 생기지 않을 때까지 다시 본다. `dev:consolidate_exclusions`
+- consolidate의 Python 뒷정리는 계획보다 넓다. `decisions/`와 작업 기록 노트의 링크도 Python이 고친다(LLM은 이 파일을 고치지 못한다). 루트 파일의 링크는 경로 형태만 고친다(`[[이름]]`은 다른 도메인 페이지일 수 있다). project 페이지를 합치면 `repos`도 합치고, 정체성 검사는 `repos`도 늘기만 해야 통과다(세션 훅이 레포로 프로젝트를 찾는다). 없앨 페이지의 이름은 남는 페이지에만 별칭으로 더한다(`verify.sync_aliases`의 `only`). 계획의 "sync_aliases와 같은 경로"대로 도메인 전체에 맞추면 없앨 페이지와 흔한 별칭을 함께 가진 다른 페이지(type이 달라도)가 남는 페이지의 title까지 별칭으로 받아, 링크 변환·별칭 캐시·승격에서 두 페이지가 같은 이름이 됐다. 계획의 "mention_groups에도 같은 묶음으로"도 그대로 하지 않는다. absorb가 저장된 묶음을 매번 그 이름을 가진 모든 페이지에 맞추므로, 다른 페이지가 가진 이름은 빼고 적는다(남는 페이지는 이미 모두 가지고 있다). LLM이 src id를 잘못 옮겨 적은 것은 absorb의 `src_id_repair`처럼 묶음 자신의 id로 고친다. 도메인 전체의 철회 src 검사는 끄고(새 원본이 없으니 철회도 없다) 고친 페이지는 그대로 검사한다. `dev:consolidate_python_edits`
+- consolidate는 LLM에게 `updated`를 바꾸지 말라고 한다. 새 원본 없이 날짜가 바뀌면 21일 `paused` 판정이 어긋나기 때문이다. 같은 이유로 루트 파일 조립에서 handoff 14일 만료와 `paused`는 하지 않는다(absorb의 일). 계획의 신호 4(오래 정리 안 한 페이지)는 한 페이지짜리 묶음으로 채운다. 묶음이 있는 normal 실행은 모두 실패하거나 바꿀 것이 없어도 absorb처럼 `log.md` 한 줄과 색인 커밋을 남긴다. `dev:consolidate_maintenance`
+- consolidate는 계획에 없던 상태 파일을 쓴다: `.state/last-consolidate`(마지막 normal 결과, `status`용), `.state/consolidate-running.json`(도는 동안), `.state/last-consolidate-report.json`(0600, 전체 보고. `--dry-run`과 `--plan`은 `last-consolidate-preview.json`, `last-consolidate-plan.json`에 따로 써서, 계획에서 "보고서에만 적는" 어긋남 목록이 미리보기에 지워지지 않는다). 미리보기 diff 폴더는 실패 사본처럼 최근 5회만 남긴다. 저장된 루트 파일 조각은 병합 전에 고쳐 쓴다(계획은 순서를 말하지 않았다. 병합 뒤에 쓰다 실패하거나 그 사이에 멈추면 absorb가 매일 지운 페이지 링크를 루트 파일에 되살린다). 실패 사본 폴더 이름은 absorb 묶음 폴더와 겹치지 않게 `consolidate-<n>`이고, 어긋남 설명과 notes는 길이를 자르고 비밀값을 가린 뒤 보고서 파일에 쓴다. 캐시의 `pending`은 absorb만 쓰므로 그대로 넘겨받는다. 결과 JSON에는 absorb 보고와 구별하려고 `"command": "consolidate"`가 붙는다. `dev:consolidate_state_files`
+- consolidate의 7일 규칙에 계획에 없던 것을 정했다. 마지막 정리가 오늘이면 `min_days_between_runs`가 0이어도 다시 돌지 않는다(30분마다 돌며 돈을 쓰지 않게). absorb 장부에 오늘 기록이 없거나 마지막이 `held`면 미룬다(계획은 "ok 또는 empty"만 말했다). `--dry-run`은 장부에 `mode`와 함께 남되 7일에 세지 않고 Slack도 보내지 않는다. `--plan`은 장부에 남지 않는다. `--max-groups`는 1 이상만 받는다(0이면 빈 normal 실행이 그 주를 써 버린다). `consolidate.enabled`는 자동 실행만 끈다. `status`의 알림 실패 경고는 장부의 마지막 normal 기록을 본다(그 뒤의 `--dry-run` 기록은 알림이 없어 실패를 가렸다). `dev:consolidate_schedule`
+- 계획은 `foreign_user_rules` 검사를 전제 확인에 두었지만 무엇을 막는지는 말하지 않았다. 묶음마다 거절하면 personal 묶음이 실행의 묶음 자리를 먼저 차지해(같은 점수면 personal이 work보다 앞선다) work가 매주 밀렸으므로, personal 페이지를 후보에서 뺀다. 지시문의 고칠 페이지 목록에는 섹션 제목을 넣지 않는다(밖에서 온 글이 제목이 되면 지시 부분에 들어간다). `dev:consolidate_user_rules`
 
 ## 격리 실측 (claude 2.1.318, 2026-11-06)
 
