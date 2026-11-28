@@ -41,7 +41,7 @@
   },
   "effort": {"light": "medium", "std": "high", "heavy": "xhigh"},
   "lanes": {
-    "S": {"implement_tier": "std", "critics": 0, "separate_tests": false, "review_rounds": 1, "token_cap": 30000000, "plan_approval": false, "cn_implement": true},
+    "S": {"implement_tier": "std", "critics": 0, "separate_tests": false, "review_rounds": 3, "token_cap": 30000000, "plan_approval": false, "cn_implement": true},
     "M": {"implement_tier": "std", "critics": 1, "separate_tests": false, "review_rounds": 3, "token_cap": 200000000, "plan_approval": false, "cn_implement": true},
     "L": {"implement_tier": "heavy", "critics": 3, "separate_tests": true, "review_rounds": 3, "token_cap": 600000000, "plan_approval": true, "cn_implement": false}
   },

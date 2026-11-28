@@ -227,7 +227,8 @@ class ReceiptTest(unittest.TestCase):
         self.assertTrue(any("상한" in x for x in self.check(r, done(r, review={"rounds": 4}))[1]))
         self.assertFalse(self.check(r, done(r, review={"unresolved_valid_findings": 1}))[0])
         small = roster(lane="S")
-        self.assertFalse(self.check(small, done(small, review={"rounds": 2}))[0])
+        self.assertTrue(self.check(small, done(small, review={"rounds": 3}))[0])
+        self.assertFalse(self.check(small, done(small, review={"rounds": 4}))[0])
 
     def test_transcript_verification_and_alias_exception(self):
         r = roster(switch="off")  # Claude 리뷰어
