@@ -6,7 +6,7 @@
   },
   "projects": {
     "seoulseeing": {"primary": "codex", "cn_allowed": true, "stop_at": "in_review"},
-    "homeshopick": {"primary": "codex", "cn_allowed": true, "stop_at": "pr"},
+    "homeshopick": {"primary": "codex", "cn_allowed": true, "stop_at": "in_review"},
     "coo": {"primary": "codex", "cn_allowed": true, "stop_at": "in_review"},
     "core-ser": {"primary": "claude", "cn_allowed": true, "stop_at": "in_review",
                  "ready_states": ["Todo", "시작 대기"],
