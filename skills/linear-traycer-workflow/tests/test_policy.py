@@ -61,7 +61,7 @@ class ResolveTest(unittest.TestCase):
         result = run(lane="S")
         self.assertEqual(result["roles"]["critics"], [])
         self.assertNotIn("test_writer", result["roles"])
-        self.assertEqual(result["limits"]["review_rounds"], 1)
+        self.assertEqual(result["limits"]["review_rounds"], 3)
 
     def test_exhausted_primary_falls_back_at_same_tier(self):
         result = run(exhausted=["codex"])
