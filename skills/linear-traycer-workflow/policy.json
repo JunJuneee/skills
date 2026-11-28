@@ -27,14 +27,14 @@
     "qwen": {
       "harness": "qwen",
       "cn": true,
-      "models": {"std": "qwen4-max-preview(openai)"}
+      "models": {"std": "qwen3.8-max(openai)"}
     },
     "deepseek": {
       "harness": "qwen",
       "cn": true,
       "models": {
         "light": "deepseek-v4.1-flash(openai)",
-        "std": "deepseek-v4-pro(openai)",
+        "std": "deepseek-v4-pro-0813(openai)",
         "heavy": "deepseek-v4-pro-0813(openai)"
       }
     }
