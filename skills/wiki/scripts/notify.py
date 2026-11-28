@@ -9,6 +9,14 @@ text or warning strings. Four states:
   failure  status failed  "위키: 실패 (claude_flags_missing)"
   held     status held    "위키: 한도 보류 · 반영 3 · 새 페이지 0 · 격리 0 · 전역 선호 +0/−0 · 실패 1"
 
+A consolidate report (report["command"] == "consolidate") gets its own line,
+counts and a reason code only as well:
+
+  success  "위키 정리: 묶음 3 · 합침 1 · 고침 4 · 실패 0 · 어긋남 2"
+  zero     "위키 정리: 묶음 0"
+  failure  "위키 정리: 실패 (lock_busy)"
+  held     "위키 정리: 한도 보류 · 묶음 2 · 합침 0 · 고침 1 · 실패 1 · 어긋남 0"
+
 Sending (panel D-7 B): chat.postMessage through urllib. The bot token comes
 from `token_cmd`, an argv list run without a shell (for example
 ["doppler", "secrets", "get", "SLACK_BOT_TOKEN", "--plain", "--project", "<p>",
@@ -90,9 +98,37 @@ def classify(report):
     return STATE_FAILURE
 
 
+CONSOLIDATE = "consolidate"
+
+
+def format_consolidate_line(report):
+    """consolidate's line: integers and a reason code only (no page path,
+    no conflict text)."""
+    state = classify(report)
+    if state == STATE_FAILURE:
+        return "위키 정리: 실패 (%s)" % safe_reason(report.get("reason"))
+    if state == STATE_ZERO:
+        return "위키 정리: 묶음 0"
+    groups = report.get("groups")
+    count = len(groups) if isinstance(groups, list) else _count(groups)
+    parts = ["묶음 %d" % count,
+             "합침 %d" % _count(report.get("merges")),
+             "고침 %d" % _count(report.get("changed")),
+             "실패 %d" % _count(report.get("failed")),
+             "어긋남 %d" % _count(report.get("conflicts"))]
+    if _count(report.get("deferred_groups")):
+        parts.append("보류 %d" % _count(report.get("deferred_groups")))
+    prefix = "위키 정리(미리보기): " if report.get("mode") == "dry_run" else "위키 정리: "
+    if state == STATE_HELD:
+        prefix += "한도 보류 · "
+    return prefix + " · ".join(parts)
+
+
 def format_line(report):
     """The fixed-wording line, built only from integers and a reason code."""
     report = report or {}
+    if report.get("command") == CONSOLIDATE:
+        return format_consolidate_line(report)
     state = classify(report)
     if state == STATE_FAILURE:
         return "위키: 실패 (%s)" % safe_reason(report.get("reason"))
@@ -245,8 +281,9 @@ def post_message(token, channel, text, transport=None):
 
 
 def notify(root, report, environ=None, settings=None, transport=None, token_run=None):
-    """Send (or log) the line for one absorb report. Never raises; returns
-    {state, text, mode, sent, reason}. The caller records it in the ledger."""
+    """Send (or log) the line for one absorb or consolidate report. Never
+    raises; returns {state, text, mode, sent, reason}. The caller records it
+    in that command's ledger."""
     environ = os.environ if environ is None else environ
     result = collections.OrderedDict()
     result["state"] = classify(report)

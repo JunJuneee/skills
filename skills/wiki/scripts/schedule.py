@@ -30,6 +30,17 @@ reaches a result, manual or scheduled, ok/empty/failed/held, is appended to
 the ledger .state/absorb-ledger.json, so a failure is retried tomorrow, not
 every 30 minutes. A busy lock or a missing wiki is a silent skip.
 
+The 7-day rule (consolidate, on the same job): a tick on which absorb is
+not due runs consolidate instead when consolidate_due says so:
+settings.consolidate.enabled, the last normal consolidate started at least
+consolidate.min_days_between_runs (7) days ago and not today (or there is
+none), and today's last absorb ledger entry is ok or empty. consolidate's
+runs go to their own ledger .state/consolidate-ledger.json, so absorb's
+last_run_epoch and the 20-hour rule never see them. A failure counts as the
+week's run; a dry run is recorded with its mode and never counts. One tick
+never runs both, and the plist (ProgramArguments ... absorb --scheduled)
+stays as it is.
+
 LaunchAgents and launchctl are injectable (arguments, or WIKI_LAUNCH_AGENTS_DIR
 and WIKI_LAUNCHCTL); every path is resolved from the environ passed in.
 """
@@ -61,6 +72,7 @@ PLUGIN_MANIFESTS = (os.path.join(".codex-plugin", "plugin.json"),
 
 BIN_MANIFEST = "BIN.json"
 LEDGER_NAME = "absorb-ledger.json"
+CONSOLIDATE_LEDGER = "consolidate-ledger.json"
 LAUNCHD_LOG = "launchd.log"
 LEDGER_MAX = 200
 PYTHON = "/usr/bin/python3"
@@ -597,7 +609,9 @@ def uninstall(root, environ, no_load=False, agents_dir=None, launchctl=None, uid
 
 def installed_info(root, environ, agents_dir=None):
     """What the installed plist points at, and whether that .bin copy is
-    behind the scripts this process runs from (status warning bin_stale)."""
+    behind the scripts this process runs from (status warning bin_stale)
+    and holds consolidate.py at all (bin_consolidate: a copy pinned before
+    consolidate never runs it on a tick)."""
     result = collections.OrderedDict()
     try:
         settings = common.load_settings(root)
@@ -614,6 +628,7 @@ def installed_info(root, environ, agents_dir=None):
     result["current_version"] = version
     result["bin_version"] = None
     result["bin_stale"] = False
+    result["bin_consolidate"] = False
     if not result["installed"]:
         return result
     try:
@@ -629,6 +644,7 @@ def installed_info(root, environ, agents_dir=None):
     manifest = read_bin_manifest(bin_dir)
     result["bin_version"] = manifest.get("version") if manifest else None
     result["bin_stale"] = result["bin_version"] != version
+    result["bin_consolidate"] = os.path.isfile(os.path.join(bin_dir, "consolidate.py"))
     return result
 
 
@@ -636,17 +652,17 @@ def installed_info(root, environ, agents_dir=None):
 # The ledger and the 20-hour rule
 # ---------------------------------------------------------------------------
 
-def ledger_path(root):
-    return os.path.join(common.state_dir(root), LEDGER_NAME)
+def ledger_path(root, name=LEDGER_NAME):
+    return os.path.join(common.state_dir(root), name)
 
 
 def _iso(epoch):
     return datetime.datetime.fromtimestamp(epoch).astimezone().replace(microsecond=0).isoformat()
 
 
-def read_ledger(root):
+def read_ledger(root, name=LEDGER_NAME):
     try:
-        data = common.load_json_file(ledger_path(root))
+        data = common.load_json_file(ledger_path(root, name))
     except common.WikiError:
         return {"runs": []}
     if not isinstance(data, dict) or not isinstance(data.get("runs"), list):
@@ -655,13 +671,19 @@ def read_ledger(root):
     return data
 
 
-def _write_ledger(root, data):
+def _write_ledger(root, data, name=LEDGER_NAME):
     data["runs"] = data["runs"][-LEDGER_MAX:]
     common.ensure_private_dir(common.state_dir(root))
-    common.atomic_write_text(ledger_path(root), common.dumps_json(data), mode=0o600)
+    common.atomic_write_text(ledger_path(root, name), common.dumps_json(data), mode=0o600)
 
 
-def make_entry(report, started, finished, scheduled):
+ABSORB_COUNTS = ("applied", "new_pages", "quarantined", "unresolved", "rules_added",
+                 "rules_removed")
+CONSOLIDATE_COUNTS = ("merges", "changed", "failed", "conflicts", "deferred_groups",
+                      "rules_added", "rules_removed")
+
+
+def make_entry(report, started, finished, scheduled, counts=ABSORB_COUNTS):
     entry = collections.OrderedDict()
     entry["started_at"] = _iso(started)
     entry["started_epoch"] = round(started, 3)
@@ -672,24 +694,23 @@ def make_entry(report, started, finished, scheduled):
     entry["reason"] = report.get("reason")
     entry["counts"] = collections.OrderedDict(
         (key, report.get(key, 0) if isinstance(report.get(key, 0), int) else 0)
-        for key in ("applied", "new_pages", "quarantined", "unresolved",
-                    "rules_added", "rules_removed"))
+        for key in counts)
     entry["notify"] = None
     return entry
 
 
-def record_run(root, entry):
-    data = read_ledger(root)
+def record_run(root, entry, name=LEDGER_NAME):
+    data = read_ledger(root, name)
     data["runs"].append(entry)
-    _write_ledger(root, data)
+    _write_ledger(root, data, name)
 
 
-def record_notify(root, started_epoch, result):
-    data = read_ledger(root)
+def record_notify(root, started_epoch, result, name=LEDGER_NAME):
+    data = read_ledger(root, name)
     for entry in reversed(data["runs"]):
         if entry.get("started_epoch") == started_epoch:
             entry["notify"] = result
-            _write_ledger(root, data)
+            _write_ledger(root, data, name)
             return True
     return False
 
@@ -725,15 +746,90 @@ def due_check(root, settings, now_epoch):
     return True, "due"
 
 
+def _next_midnight(epoch):
+    day = datetime.datetime.fromtimestamp(epoch).date() + datetime.timedelta(days=1)
+    return time.mktime(datetime.datetime(day.year, day.month, day.day).timetuple())
+
+
 def next_due_epoch(root, settings):
     last = last_run_epoch(root)
     if last is None:
         return None
     hours = (settings.get("schedule") or {}).get("min_hours_between_runs", 20)
     by_hours = last + float(hours) * 3600.0
-    day = datetime.datetime.fromtimestamp(last).date() + datetime.timedelta(days=1)
-    midnight = time.mktime(datetime.datetime(day.year, day.month, day.day).timetuple())
-    return max(by_hours, midnight)
+    return max(by_hours, _next_midnight(last))
+
+
+# ---------------------------------------------------------------------------
+# consolidate on the same job: its ledger and the 7-day rule
+# ---------------------------------------------------------------------------
+
+CADENCE_MODE = "normal"
+
+
+def _epoch(entry):
+    value = entry.get("started_epoch")
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return float(value)
+    return None
+
+
+def last_consolidate_epoch(root):
+    """Start time of the last consolidate that counts for the 7-day rule: a
+    normal run, whatever its status (a failure is the week's run too). Dry
+    runs are recorded but never count."""
+    for entry in reversed(read_ledger(root, CONSOLIDATE_LEDGER)["runs"]):
+        if entry.get("mode", CADENCE_MODE) != CADENCE_MODE:
+            continue
+        value = _epoch(entry)
+        if value is not None:
+            return value
+    return None
+
+
+def absorb_status_today(root, now_epoch):
+    """Status of today's (local date) last absorb ledger entry, or None
+    when absorb has not run today. Only the ledger counts (no last-absorb
+    fallback)."""
+    today = time.localtime(now_epoch)[:3]
+    for entry in reversed(read_ledger(root)["runs"]):
+        value = _epoch(entry)
+        if value is not None and time.localtime(value)[:3] == today:
+            return entry.get("status")
+    return None
+
+
+def consolidate_due(root, settings, now_epoch):
+    """(due, why): why is disabled, ran_today, too_soon, absorb_not_today,
+    absorb_not_ok, first_run or due. consolidate runs on a day absorb ended
+    ok or empty, so it always tidies fresh pages; a failed (or held) absorb
+    puts it off to the next day."""
+    cfg = settings.get("consolidate") or {}
+    if not cfg.get("enabled", True):
+        return False, "disabled"
+    last = last_consolidate_epoch(root)
+    if last is not None:
+        if time.localtime(last)[:3] == time.localtime(now_epoch)[:3]:
+            return False, "ran_today"
+        days = cfg.get("min_days_between_runs", 7)
+        if now_epoch - last < float(days) * 86400.0:
+            return False, "too_soon"
+    status = absorb_status_today(root, now_epoch)
+    if status is None:
+        return False, "absorb_not_today"
+    if status not in ("ok", "empty"):
+        return False, "absorb_not_ok"
+    return True, "first_run" if last is None else "due"
+
+
+def next_consolidate_epoch(root, settings):
+    """Earliest time the 7-day rule allows the next consolidate (it then
+    waits for that day's absorb), or None with no counted run yet."""
+    last = last_consolidate_epoch(root)
+    if last is None:
+        return None
+    days = (settings.get("consolidate") or {}).get("min_days_between_runs", 7)
+    return max(last + float(days) * 86400.0, _next_midnight(last))
 
 
 def _failed_report(reason):
@@ -770,13 +866,18 @@ def run_collect(root, environ, collect_fn=None):
 
 
 def run_absorb(root, environ, scheduled=False, rules_path=None, send=True, absorb_fn=None,
-               notify_fn=None, clock=None, collect_fn=None, do_collect=True):
+               notify_fn=None, clock=None, collect_fn=None, do_collect=True,
+               consolidate_fn=None):
     """absorb with the ledger and the Slack line around it.
 
     Returns the report, or None for a silent scheduled skip (not due, lock
     busy, no wiki). Order: collect, run, ledger, notify, ledger notify
     field, so a crash in notify never makes the run count twice or run
-    again. collect runs only once the run is due (not on every tick)."""
+    again. collect runs only once the run is due (not on every tick).
+
+    A scheduled tick on which absorb is not due goes to run_consolidate
+    (the 7-day rule) and returns its report (report["command"] is
+    "consolidate"), or None when that is not due either."""
     clock = clock or time.time
     if scheduled:
         if not common.is_initialized(root) or not os.path.isdir(os.path.join(root, ".git")):
@@ -787,7 +888,11 @@ def run_absorb(root, environ, scheduled=False, rules_path=None, send=True, absor
             settings = common.validate_settings({})
         due, _why = due_check(root, settings, clock())
         if not due:
-            return None
+            # Never both in one tick: consolidate only where absorb is not
+            # due, with the same rules path and Slack setting.
+            return run_consolidate(root, environ, scheduled=True, rules_path=rules_path,
+                                   send=send, consolidate_fn=consolidate_fn,
+                                   notify_fn=notify_fn, clock=clock)
     if absorb_fn is None:
         import absorb
         absorb_fn = absorb.absorb
@@ -839,6 +944,87 @@ def run_absorb(root, environ, scheduled=False, rules_path=None, send=True, absor
         report["notify"] = result
         try:
             record_notify(root, entry["started_epoch"], result)
+        except (common.WikiError, IOError, OSError):
+            report["warnings"].append("ledger_write_failed")
+    return report
+
+
+def _failed_consolidate_report(reason, mode, scheduled):
+    import consolidate
+
+    report = consolidate.new_report(mode, scheduled)
+    report["status"] = "failed"
+    report["reason"] = reason
+    report["summary_line"] = consolidate.summary_line(report)
+    return report
+
+
+def run_consolidate(root, environ, scheduled=False, rules_path=None, send=True,
+                    mode="normal", domain=None, max_groups=None, consolidate_fn=None,
+                    notify_fn=None, clock=None):
+    """consolidate with its own ledger and the Slack line around it, in
+    run_absorb's order (run, ledger, notify, ledger notify field).
+
+    Returns the report, or None for a silent scheduled skip (not due, lock
+    busy, no wiki). Every run that reaches a result is recorded with its
+    mode; a dry run sends no Slack line and never counts for the 7-day
+    rule. --plan does not come here (no lock, nothing recorded)."""
+    clock = clock or time.time
+    if scheduled:
+        if not common.is_initialized(root) or not os.path.isdir(os.path.join(root, ".git")):
+            return None
+        try:
+            settings = common.load_settings(root)
+        except common.WikiError:
+            settings = common.validate_settings({})
+        due, _why = consolidate_due(root, settings, clock())
+        if not due:
+            return None
+    if consolidate_fn is None:
+        import consolidate
+        consolidate_fn = consolidate.consolidate
+    started = clock()
+    try:
+        report = consolidate_fn(root, environ, now=datetime.datetime.fromtimestamp(started),
+                                rules_path=rules_path, mode=mode, domain=domain,
+                                max_groups=max_groups, scheduled=scheduled)
+    except common.LockBusy:
+        if scheduled:
+            return None
+        raise
+    except common.WikiError as exc:
+        if exc.reason == "not_initialized":
+            if scheduled:
+                return None
+            raise
+        report = _failed_consolidate_report(exc.reason, mode, scheduled)
+    except Exception:
+        # Same as absorb: the traceback may name pages, so it goes to the
+        # report file only (and launchd.log for a scheduled run).
+        trace = traceback.format_exc()
+        if scheduled:
+            sys.stderr.write(trace)
+        report = _failed_consolidate_report("internal_error", mode, scheduled)
+        report["traceback"] = trace
+    report.setdefault("warnings", [])
+    entry = make_entry(report, started, clock(), scheduled, CONSOLIDATE_COUNTS)
+    entry["mode"] = mode
+    try:
+        record_run(root, entry, CONSOLIDATE_LEDGER)
+    except (common.WikiError, IOError, OSError):
+        report["warnings"].append("ledger_write_failed")
+    if send and mode == CADENCE_MODE:
+        if notify_fn is None:
+            import notify
+            notify_fn = notify.notify
+        try:
+            result = notify_fn(root, report, environ)
+        except Exception:
+            result = {"state": None, "text": None, "mode": None, "sent": False,
+                      "reason": "notify_internal_error"}
+        report["notify"] = result
+        try:
+            record_notify(root, entry["started_epoch"], result, CONSOLIDATE_LEDGER)
         except (common.WikiError, IOError, OSError):
             report["warnings"].append("ledger_write_failed")
     return report

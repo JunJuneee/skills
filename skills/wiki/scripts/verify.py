@@ -764,9 +764,23 @@ def check_batch(wt, pre_sha, batch, entries, domains_cfg, extra_sources=()):
     before commit_batch records them)."""
     domain = common.batch_domain(batch["sources"])
     globs = batch["allowed_globs"]
+    index = SourceIndex(entries, list(extra_sources) + list(batch["sources"]), domain)
+    return check_changes(wt, pre_sha, domain, lambda path: common.path_allowed(path, globs),
+                         index, domains_cfg)
+
+
+def check_changes(wt, pre_sha, domain, allowed, index, domains_cfg,
+                  outside_code="outside_allowed_globs", scan_withdrawn=True):
+    """check_batch with the domain, the write scope and the source index
+    given explicitly (consolidate has no batch sources to take them from).
+    allowed(path) is True for a path the step may change; any other changed
+    path fails with outside_code. A predicate, not globs: a page name may
+    hold '*' or '?'. scan_withdrawn also fails a src of a source withdrawn
+    from the domain on every page of it (absorb withdraws sources;
+    consolidate withdraws none, so a stale citation elsewhere must not fail
+    each of its groups; the pages it changes are still checked)."""
     allow = scan_allow(wt, domains_cfg)
     terms = Terms(domains_cfg.get("work_terms", []))
-    index = SourceIndex(entries, list(extra_sources) + list(batch["sources"]), domain)
     other = [d for d in common.DOMAINS if d != domain]
     other_names = set()
     for name in other:
@@ -776,8 +790,8 @@ def check_batch(wt, pre_sha, batch, entries, domains_cfg, extra_sources=()):
     changes = changed_files(wt, pre_sha)
 
     for _status, path in changes:
-        if not common.path_allowed(path, globs):
-            problems.append("outside_allowed_globs:%s" % path)
+        if not allowed(path):
+            problems.append("%s:%s" % (outside_code, path))
             continue
         full = os.path.join(wt, path)
         if os.path.lexists(full):
@@ -824,7 +838,7 @@ def check_batch(wt, pre_sha, batch, entries, domains_cfg, extra_sources=()):
             pages.append(path)
 
     # A source withdrawn from this domain must not stay cited anywhere in it.
-    if index.withdrawn:
+    if scan_withdrawn and index.withdrawn:
         for rel in iter_page_files(wt, domain):
             try:
                 main_part = before_notes(read_text(os.path.join(wt, rel)))
@@ -898,6 +912,167 @@ def assert_notes_unchanged(wt, snapshot):
             problems.append("my_notes_changed:%s" % rel)
     if problems:
         raise BatchFailure(problems)
+
+
+# ---------------------------------------------------------------------------
+# Conservation measures and link rewriting (consolidate)
+# ---------------------------------------------------------------------------
+
+_URL_RE = re.compile(r"https?://[^\s<>()\[\]`\"']+")
+_CODE_SPAN_RE = re.compile(r"`([^`\n]+)`")
+_EXT_RE = re.compile(r"\.[A-Za-z0-9]{1,8}$")
+_IDISH_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_.:@#+=-]*$")
+_WIKILINK_PARTS_RE = re.compile(r"\[\[([^\[\]|#^\n]+)([#^][^\[\]|\n]*)?(\|[^\[\]\n]*)?\]\]")
+_MDLINK_PARTS_RE = re.compile(r"(\]\(\s*<?)([^)\s>]+)(>?(?:\s+\"[^\"\n]*\")?\s*\))")
+_INLINE_CODE_RE = re.compile(r"`[^`\n]*`")
+
+
+def src_pairs(text):
+    """{(id, date)} of the src comments of a page above '## 내 메모'
+    (fenced code excluded): what consolidate must keep, as a set."""
+    return set(_section_srcs(before_notes(text)))
+
+
+def _code_ref(value):
+    """True for an inline-code span that names a path or an id (SCHEMA
+    '## 자료': `경로 또는 id`): a ~/, / or ./ path (spaces allowed), or a
+    token without spaces holding '/' or ':', ending in a file extension, or
+    an id-like token with a digit."""
+    if len(value) < 3 or len(value) > 300:
+        return False
+    if value.startswith(("~/", "/", "./", "../")):
+        return True
+    if any(ch.isspace() for ch in value):
+        return False
+    if "/" in value or ":" in value or _EXT_RE.search(value):
+        return True
+    return (len(value) >= 6 and bool(_IDISH_RE.match(value))
+            and any(ch.isdigit() for ch in value))
+
+
+def kept_links(text):
+    """{https URL} and {`path or id`} of a page above '## 내 메모' (fenced
+    code excluded): the references consolidate may move but not lose."""
+    main = strip_fences(before_notes(text))
+    found = set()
+    for match in _URL_RE.finditer(main):
+        url = match.group(0).rstrip(".,;:!?")
+        if len(url) > len("https://"):
+            found.add(url)
+    for match in _CODE_SPAN_RE.finditer(main):
+        value = match.group(1).strip()
+        if _code_ref(value):
+            found.add("`%s`" % value)
+    return found
+
+
+def main_bytes(text):
+    """UTF-8 size of a page body above '## 내 메모' (frontmatter excluded)."""
+    return len(before_notes(text).encode("utf-8"))
+
+
+def section_item_counts(text):
+    """{'## heading': top-level list items} above '## 내 메모' (code-aware)."""
+    counts = collections.OrderedDict()
+    current = None
+    fence = None
+    for line in before_notes(text).splitlines(True):
+        fence, match = common.fence_step(fence, line)
+        if match or fence is not None:
+            continue
+        heading = _SECTION_RE.match(line.rstrip("\r\n"))
+        if heading:
+            current = heading.group(1).strip()
+            counts.setdefault(current, 0)
+        elif current is not None and _ITEM_START_RE.match(line):
+            counts[current] += 1
+    return counts
+
+
+def link_resolves_to(target, page):
+    """True when a link target (wikilink or markdown link) points at page
+    (a wiki-relative .md path): the same path with or without .md and an
+    #anchor, a path its own folder ends with, or a bare name equal to its
+    file name (Obsidian resolves bare names vault-wide). NFKC + casefold."""
+    path = target_path(target)
+    if not path:
+        return False
+    path = path.split("#", 1)[0].strip()
+    if path.endswith(".md"):
+        path = path[:-3]
+    want = page[:-3] if page.endswith(".md") else page
+    path, want = fold(path), fold(want)
+    return bool(path) and (path == want or want.endswith("/" + path))
+
+
+def links_to(text, page):
+    """True when text links to page anywhere outside code (wikilinks and
+    markdown links; frontmatter, '## 내 메모' and headings included)."""
+    return any(link_resolves_to(target, page) for target in link_targets(text or ""))
+
+
+def _rewrite_line(line, page, into, bare, count):
+    pieces = []
+    pos = 0
+    for code in _INLINE_CODE_RE.finditer(line):
+        pieces.append((line[pos:code.start()], False))
+        pieces.append((code.group(0), True))
+        pos = code.end()
+    pieces.append((line[pos:], False))
+    target_new = into[:-3] if into.endswith(".md") else into
+
+    def wiki(match):
+        target = match.group(1)
+        if not link_resolves_to(target, page) or ("/" not in target.strip() and not bare):
+            return match.group(0)
+        count[0] += 1
+        # Without a display text the reader saw the old target: keep it.
+        shown = match.group(3) or "|" + target.strip().replace("|", "/")
+        return "[[%s%s%s]]" % (target_new, match.group(2) or "", shown)
+
+    def markdown(match):
+        target = match.group(2)
+        if not link_resolves_to(target, page) or ("/" not in target and not bare):
+            return match.group(0)
+        anchor = target[target.index("#"):] if "#" in target else ""
+        base = target[:len(target) - len(anchor)]
+        new = into if urllib.parse.unquote(base).endswith(".md") else target_new
+        count[0] += 1
+        return match.group(1) + new.replace(" ", "%20") + anchor + match.group(3)
+
+    out = []
+    for chunk, protected in pieces:
+        if not protected:
+            chunk = _MDLINK_PARTS_RE.sub(markdown, _WIKILINK_PARTS_RE.sub(wiki, chunk))
+        out.append(chunk)
+    return "".join(out)
+
+
+def rewrite_links(text, page, into, bare=True):
+    """text with every wikilink and markdown link to page (wiki-relative .md
+    paths) pointed at into; display text and #anchor are kept. The
+    frontmatter and the '## 내 메모' tail are copied byte-for-byte, fenced
+    and inline code are skipped (the rules convert_links follows). A bare
+    [[name]] link is rewritten only with bare (the caller knows the name is
+    unique). Returns (text, number of links rewritten)."""
+    try:
+        _fm_text, body, _newline = common.split_frontmatter(text)
+    except common.FrontmatterError:
+        return text, 0
+    head = text[:len(text) - len(body)]
+    main_part, notes = common.split_my_notes(body)
+    count = [0]
+    out = []
+    fence = None
+    for line in main_part.splitlines(True):
+        fence, match = common.fence_step(fence, line)
+        if match or fence is not None:
+            out.append(line)
+            continue
+        out.append(_rewrite_line(line, page, into, bare, count))
+    if not count[0]:
+        return text, 0
+    return head + "".join(out) + notes, count[0]
 
 
 # ---------------------------------------------------------------------------
@@ -1133,13 +1308,18 @@ def recheck_pages(wt, domain, paths, domains_cfg, known_ids=None):
         raise BatchFailure(problems)
 
 
-def sync_aliases(wt, domain, groups, terms=None):
+def sync_aliases(wt, domain, groups, terms=None, only=None):
     """Add every merged name to the aliases of the page that already holds
     one of them (D9). Python edits frontmatter only. Returns changed paths.
     A personal page whose path hits work_terms is never edited: the edit
-    would fail recheck_pages on every run (stored groups persist)."""
+    would fail recheck_pages on every run (stored groups persist). only
+    (paths) limits the edit to those pages (consolidate: the survivor of a
+    merge, so a page sharing a generic name keeps its own names)."""
     changed = []
     pages = load_pages(wt, domain)
+    if only is not None:
+        keep = set(only)
+        pages = [page for page in pages if page.path in keep]
     if domain == "personal" and terms is not None:
         pages = [page for page in pages if not terms.hits(page.path)]
     for page in pages:

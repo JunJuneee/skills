@@ -687,6 +687,9 @@ class AbsorbHookTest(CollectCase):
 
     def test_skipped_when_not_due_or_turned_off(self):
         seen = []
+        # Not-due ticks may hand off to consolidate; off here (collect only).
+        with open(os.path.join(self.root, "settings.json"), "w", encoding="utf-8") as handle:
+            json.dump({"consolidate": {"enabled": False}}, handle)
 
         def collect_fn(root, environ):
             seen.append("collect")

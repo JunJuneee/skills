@@ -4,6 +4,8 @@
 Usage:
   wiki.py [--root DIR] [--json] init
   wiki.py absorb [--scheduled] [--rules-path FILE] [--no-notify] [--verbose]
+  wiki.py consolidate [--plan|--dry-run] [--domain work|personal] [--max-groups N]
+                      [--rules-path FILE] [--no-notify] [--verbose]
   wiki.py note --domain work|personal TEXT
   wiki.py query [--domain work|personal] [--limit N] TEXT
   wiki.py status
@@ -232,6 +234,10 @@ def cmd_absorb(args, environ):
         if args.json:
             sys.stdout.write(common.dumps_json({"ok": True, "skipped": True}))
         return EXIT_OK
+    if report.get("command") == "consolidate":
+        # A scheduled tick on which absorb was not due ran consolidate (the
+        # 7-day rule): its own report file, never last-report.json.
+        return print_consolidate(args, root, report, scheduled=args.scheduled)
     import absorb
 
     # The full report (page paths, source ids) stays in .state; the session
@@ -261,6 +267,103 @@ def cmd_absorb(args, environ):
         if sent.get("mode") == "slack" and not sent.get("sent"):
             sys.stderr.write("알림 실패: %s\n" % sent.get("reason"))
     return EXIT_OK if report.get("ok") else EXIT_ERROR
+
+
+def _consolidate_group_line(group, verbose):
+    """One line per group: domain, signal and counts; with verbose also
+    the page paths, merges, problems and conflicts (report file only)."""
+    members = group.get("members") if "members" in group else group.get("pages")
+    size = members if isinstance(members, int) else len(members or [])
+    parts = ["묶음 %s" % group.get("group_id"), str(group.get("domain")),
+             str(group.get("signal") or group.get("signal_code")), "페이지 %d" % size]
+    if "ok" in group:
+        if group.get("ok"):
+            parts.append("보류" if group.get("deferred") else str(group.get("result")))
+        else:
+            parts.append("실패 %s" % group.get("reason"))
+    line = "- " + " · ".join(parts)
+    if not verbose:
+        return [line]
+    lines = [line]
+    if isinstance(members, list):
+        lines.append("    페이지: " + ", ".join(members))
+    if group.get("context"):
+        lines.append("    참고: " + ", ".join(group["context"]))
+    for loser, into in group.get("merges") or []:
+        lines.append("    합침: %s -> %s" % (loser, into))
+    for loser in group.get("blocked_merges") or []:
+        lines.append("    합치지 않음(내 메모 등에서 링크): %s" % loser)
+    for problem in group.get("problems") or []:
+        lines.append("    문제: %s" % problem)
+    for item in group.get("conflicts") or []:
+        lines.append("    어긋남: %s (%s)" % (item.get("fact"), ", ".join(item.get("pages") or [])))
+    return lines
+
+
+def print_consolidate(args, root, report, scheduled=False):
+    """Print a consolidate report the way absorb's is printed: status,
+    reason codes and counts (public_report); --verbose adds the page paths
+    from the full report. Returns the exit code."""
+    import absorb
+    import consolidate
+
+    path = consolidate.write_report_file(root, report)
+    verbose = bool(getattr(args, "verbose", False))
+    public = consolidate.public_report(report, path)
+    if args.json:
+        sys.stdout.write(common.dumps_json(report if verbose else public))
+        return EXIT_OK if report.get("ok") else EXIT_ERROR
+    line = report.get("summary_line") or ""
+    if scheduled:
+        line = "%s %s" % (datetime.datetime.now().astimezone().replace(
+            microsecond=0).isoformat(), line)
+    print(line)
+    excluded = (public.get("candidates") or {}).get("excluded") or {}
+    if excluded and report.get("mode") == consolidate.MODE_PLAN:
+        print("후보에서 뺀 페이지: " + " · ".join("%s %d" % (code, count)
+                                          for code, count in excluded.items()))
+    for group in (report.get("groups") if verbose else public["groups"]) or []:
+        for text in _consolidate_group_line(group, verbose):
+            print(text)
+    if verbose:
+        if report.get("preview_path"):
+            print("미리보기 diff: %s" % report["preview_path"])
+        for warning in report.get("warnings") or []:
+            sys.stderr.write("경고: %s\n" % warning)
+    else:
+        for code, count in absorb.warning_codes(report.get("warnings")).items():
+            sys.stderr.write("경고: %s%s\n" % (code, " ×%d" % count if count > 1 else ""))
+        if path and (report.get("warnings") or not report.get("ok")
+                     or report.get("mode") != consolidate.MODE_NORMAL):
+            sys.stderr.write("자세한 결과: %s\n" % path)
+    sent = report.get("notify") or {}
+    if sent.get("mode") == "slack" and not sent.get("sent"):
+        sys.stderr.write("알림 실패: %s\n" % sent.get("reason"))
+    return EXIT_OK if report.get("ok") else EXIT_ERROR
+
+
+def cmd_consolidate(args, environ):
+    import consolidate
+    import schedule  # the ledger, the 7-day rule and the Slack line
+
+    root = common.resolve_root(args.root, environ)
+    if args.plan and args.dry_run:
+        raise common.WikiError("usage", "give one of --plan, --dry-run")
+    if args.max_groups is not None and args.max_groups < 1:
+        # 0 would record an empty normal run and use up the week.
+        raise common.WikiError("usage", "--max-groups must be 1 or more")
+    rules_path = os.path.abspath(os.path.expanduser(args.rules_path)) if args.rules_path else None
+    if args.plan:
+        # No lock, no LLM, nothing recorded in the ledger.
+        report = consolidate.consolidate(root, environ, rules_path=rules_path,
+                                         mode=consolidate.MODE_PLAN, domain=args.domain,
+                                         max_groups=args.max_groups)
+    else:
+        mode = consolidate.MODE_DRY_RUN if args.dry_run else consolidate.MODE_NORMAL
+        report = schedule.run_consolidate(root, environ, rules_path=rules_path,
+                                          send=not args.no_notify, mode=mode,
+                                          domain=args.domain, max_groups=args.max_groups)
+    return print_consolidate(args, root, report)
 
 
 def cmd_collect(args, environ):
@@ -509,6 +612,7 @@ def status_info(root, environ, now_epoch=None):
             (key, last.get(key)) for key in ("run_id", "finished_at", "status", "reason",
                                              "summary_line"))
     import absorb
+    import consolidate
 
     running = absorb.read_running_marker(root)
     info["running"] = (collections.OrderedDict([("started_at", running.get("started_at"))])
@@ -526,6 +630,33 @@ def status_info(root, environ, now_epoch=None):
     info["scheduled_due"] = due
     info["scheduled_why"] = why
     info["next_due"] = schedule._iso(nxt) if nxt else None
+    # consolidate: the same files only (no lock, no git), like absorb's lines.
+    last = consolidate.read_last(root)
+    info["last_consolidate"] = None
+    if isinstance(last, dict):
+        info["last_consolidate"] = collections.OrderedDict(
+            (key, last.get(key)) for key in ("run_id", "finished_at", "mode", "status", "reason",
+                                             "summary_line"))
+    running = consolidate.read_running_marker(root)
+    info["consolidate_running"] = (
+        collections.OrderedDict([("started_at", running.get("started_at"))]) if running else None)
+    tidied = schedule.read_ledger(root, schedule.CONSOLIDATE_LEDGER)["runs"]
+    info["last_consolidate_run"] = tidied[-1] if tidied else None
+    # The last normal run's Slack result: a dry run (notify None) after it
+    # must not hide a failed send of the run the 7-day rule counts.
+    counted = [run for run in tidied
+               if run.get("mode", schedule.CADENCE_MODE) == schedule.CADENCE_MODE]
+    notified = (counted[-1].get("notify") or {}) if counted else {}
+    if notified.get("mode") == "slack" and not notified.get("sent"):
+        code = "notify_failed:%s" % notified.get("reason")
+        if code not in warnings:
+            warnings.append(code)
+    due, why = schedule.consolidate_due(root, settings, now_epoch)
+    nxt = schedule.next_consolidate_epoch(root, settings)
+    info["consolidate_enabled"] = bool((settings.get("consolidate") or {}).get("enabled", True))
+    info["consolidate_due"] = due
+    info["consolidate_why"] = why
+    info["next_consolidate"] = schedule._iso(nxt) if nxt else None
     info["schedule"] = schedule.installed_info(root, environ)
     if info["schedule"].get("bin_stale"):
         warnings.append("bin_stale")
@@ -605,6 +736,10 @@ def cmd_status(args, environ):
         print("장부의 마지막 실행: %s · %s%s" % (
             run.get("finished_at"), run.get("status"),
             " (%s)" % run["reason"] if run.get("reason") else ""))
+    if info.get("consolidate_running"):
+        print("consolidate: 실행 중 (%s 시작). 아래 줄은 이전 정리 결과다"
+              % info["consolidate_running"]["started_at"])
+    print("마지막 정리: %s" % _last_consolidate_text(info.get("last_consolidate")))
     pending = info["pending"]
     if pending:
         print("반영 대기: work %d · personal %d · 판정 불가 %d · 격리 %d" % (
@@ -626,9 +761,39 @@ def cmd_status(args, environ):
         print("자동 실행: 설치 안 됨 (wiki schedule install)")
     if sched.get("installed"):
         print("다음 자동 실행: %s" % ("지금" if info["scheduled_due"] else info["next_due"]))
+    print("다음 정리: %s" % _next_consolidate_text(info))
     for warning in info["warnings"]:
         print("경고: %s" % warning)
     return EXIT_OK
+
+
+def _last_consolidate_text(last):
+    """Time, status and reason code of the last consolidate (plus its
+    counts line when it did not fail)."""
+    if not last:
+        return "없음"
+    text = "%s · %s" % (last.get("finished_at"), last.get("status"))
+    if last.get("reason"):
+        text += " (%s)" % last["reason"]
+    if last.get("status") != "failed" and last.get("summary_line"):
+        text += " · %s" % last["summary_line"]
+    return text
+
+
+def _next_consolidate_text(info):
+    if not info.get("consolidate_enabled"):
+        return "꺼짐 (settings.json consolidate.enabled)"
+    if not (info.get("schedule") or {}).get("installed"):
+        return "자동 실행 설치 안 됨 (직접: wiki consolidate)"
+    if not info["schedule"].get("bin_consolidate", True):
+        # The plist runs the pinned copy, which predates consolidate.
+        return "자동 실행의 고정 스크립트에 consolidate가 없음 (wiki schedule install 다시)"
+    why = info.get("consolidate_why")
+    if info.get("consolidate_due"):
+        return "다음 자동 실행 (absorb 차례가 아닐 때)"
+    if why in ("absorb_not_today", "absorb_not_ok"):
+        return "오늘 absorb가 ok·empty로 끝난 뒤의 자동 실행"
+    return "%s 이후, 그날 absorb가 ok·empty로 끝난 뒤의 자동 실행" % info.get("next_consolidate")
 
 
 def cmd_schedule(args, environ):
@@ -707,6 +872,29 @@ def build_parser():
     p_absorb.add_argument("--no-collect", action="store_true",
                           help="skip `wiki collect` (outside activity) before absorb")
     p_absorb.set_defaults(func=cmd_absorb)
+
+    p_consolidate = sub.add_parser("consolidate", parents=[opts],
+                                   help="tidy a domain's pages (merge, settle, compress) "
+                                        "with the isolated LLM; no new source")
+    p_consolidate.add_argument("--plan", action="store_true",
+                               help="candidate groups and counts only (no lock, no LLM)")
+    p_consolidate.add_argument("--dry-run", action="store_true",
+                               help="LLM and checks, merge nothing (redacted diff under "
+                                    ".state/consolidate/<run_id>/; not counted for the 7 days)")
+    p_consolidate.add_argument("--domain", default=None, choices=common.DOMAINS,
+                               help="only this domain")
+    p_consolidate.add_argument("--max-groups", type=int, default=None, metavar="N",
+                               help="at most N groups (default settings consolidate."
+                                    "max_groups_per_run)")
+    p_consolidate.add_argument("--rules-path", default=None,
+                               help="where to write the domain-neutral rules file (as absorb)")
+    p_consolidate.add_argument("--no-notify", action="store_true",
+                               help="do not send the Slack line (the ledger still records "
+                                    "the run)")
+    p_consolidate.add_argument("--verbose", action="store_true",
+                               help="also print page paths, merges and problems; local "
+                                    "debugging only, never in a shared or public-repo session")
+    p_consolidate.set_defaults(func=cmd_consolidate)
 
     p_collect = sub.add_parser("collect", parents=[opts],
                                help="fetch GitHub/Linear/Discord activity into inbox notes")
